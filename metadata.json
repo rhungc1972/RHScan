@@ -1,0 +1,10 @@
+{
+  "name": "PocketScan Zero",
+  "description": "Escáner móvil PWA con procesamiento de visión por computadora 100% local (Zero-Knowledge), corrección de perspectiva homográfica y exportación a PDF.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
