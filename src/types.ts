@@ -1,5 +1,5 @@
 // src/types.ts
-// Tipos para PocketScan Zero
+// Tipos para RHDocScan - Escáner Móvil Privado Zero-Knowledge
 
 export interface Point {
   x: number;
@@ -13,6 +13,8 @@ export type ScanFilter = 'color' | 'grayscale' | 'binary';
 
 export type ScanMode = 'auto' | 'manual';
 
+export type ExportFormat = 'pdf' | 'jpg';
+
 export interface ScannedPage {
   id: string;
   originalDataUrl: string;
@@ -25,12 +27,22 @@ export interface ScannedPage {
   rotation?: number; // 0, 90, 180, 270
 }
 
+export interface RegisteredUserRecord {
+  id: string;
+  name: string;
+  email: string;
+  registeredAt: string;
+}
+
 export interface ScanTrackerState {
   date: string; // YYYY-MM-DD
   count: number;
   isRegistered: boolean;
   userEmail: string;
   userName: string;
+  registeredAt?: string;
+  unlimitedUntilMonth?: number; // Ej: 10 para Octubre
+  registeredUsersList?: RegisteredUserRecord[];
 }
 
 export interface DetectionResult {
@@ -39,4 +51,21 @@ export interface DetectionResult {
   confidence: number;
   isStable: boolean;
   stabilityProgress: number; // 0 a 1
+}
+
+export interface DocumentMetadata {
+  timestampLocal: string;
+  timestampUtc: string;
+  sha256Hash: string;
+  pageCount: number;
+  format: ExportFormat;
+  deviceInfo: string;
+  screenResolution: string;
+  publicIp?: string;
+  location?: {
+    latitude: number;
+    longitude: number;
+    accuracy: number;
+    mapsUrl: string;
+  };
 }

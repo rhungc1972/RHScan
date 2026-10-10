@@ -1,24 +1,29 @@
 // src/utils/pdfGenerator.ts
-// Generación de PDF multi-página client-side y Web Share API Nivel 2
+// Compilación de PDF multi-página, exportación a JPG y Web Share API Nivel 2
 
 import { jsPDF } from 'jspdf';
-import { ScannedPage } from '../types';
+import { ScannedPage, ExportFormat, DocumentMetadata } from '../types';
+import { collectDocumentMetadata, generateAuditPageDataUrl } from './metadataAudit';
 
-export interface ShareResult {
+export interface ExportResult {
   sharedViaNativeSheet: boolean;
   downloadTriggered: boolean;
   fileName: string;
+  format: ExportFormat;
+  metadata?: DocumentMetadata;
 }
 
 /**
- * Compila las páginas escaneadas en un único archivo PDF optimizado
+ * Compila las páginas escaneadas en un archivo PDF optimizado con opción de Acta de Metadatos
  */
-export async function generatePdfBlob(pages: ScannedPage[]): Promise<{ blob: Blob; fileName: string }> {
+export async function generatePdfBlob(
+  pages: ScannedPage[],
+  includeMetadata: boolean = false
+): Promise<{ blob: Blob; fileName: string; metadata?: DocumentMetadata }> {
   if (!pages || pages.length === 0) {
     throw new Error('No hay páginas para generar el documento PDF.');
   }
 
-  // Dimensiones A4 estándar en milímetros: 210 x 297
   const pdf = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -28,47 +33,127 @@ export async function generatePdfBlob(pages: ScannedPage[]): Promise<{ blob: Blo
 
   const a4Width = 210;
   const a4Height = 297;
+  const margin = 4;
+  const targetW = a4Width - margin * 2;
+  const targetH = a4Height - margin * 2;
 
+  // 1. Añadir las páginas del documento
   for (let i = 0; i < pages.length; i++) {
     if (i > 0) {
       pdf.addPage('a4', 'portrait');
     }
-
     const page = pages[i];
-    const imgData = page.warpedDataUrl;
+    pdf.addImage(page.warpedDataUrl, 'JPEG', margin, margin, targetW, targetH, undefined, 'FAST');
+  }
 
-    // Calcular proporción para encajar en A4 con márgenes mínimos de 4mm
-    const margin = 4;
-    const targetW = a4Width - margin * 2;
-    const targetH = a4Height - margin * 2;
-
-    pdf.addImage(imgData, 'JPEG', margin, margin, targetW, targetH, undefined, 'FAST');
+  // 2. Si se solicita metadatos y Hash, adjuntar el Acta Oficial como última página
+  let metadata: DocumentMetadata | undefined;
+  if (includeMetadata) {
+    metadata = await collectDocumentMetadata(pages, 'pdf');
+    const auditPageUrl = generateAuditPageDataUrl(metadata);
+    pdf.addPage('a4', 'portrait');
+    pdf.addImage(auditPageUrl, 'JPEG', margin, margin, targetW, targetH, undefined, 'FAST');
   }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const fileName = `RHDocScan_Documento_${timestamp}.pdf`;
   const blob = pdf.output('blob');
 
-  return { blob, fileName };
+  return { blob, fileName, metadata };
 }
 
 /**
- * Comparte el PDF generado utilizando la Web Share API (Nivel 2) con archivos,
- * o ejecuta la descarga directa como respaldo para navegadores de escritorio/incompatibles.
+ * Genera el paquete o imagen principal en formato JPG con opción de Acta de Metadatos
  */
-export async function shareOrDownloadPdf(pages: ScannedPage[]): Promise<ShareResult> {
-  const { blob, fileName } = await generatePdfBlob(pages);
+export async function generateJpgBlob(
+  pages: ScannedPage[],
+  includeMetadata: boolean = false
+): Promise<{ blob: Blob; fileName: string; metadata?: DocumentMetadata }> {
+  if (!pages || pages.length === 0) {
+    throw new Error('No hay páginas para generar el archivo JPG.');
+  }
 
-  // Crear objeto File estándar
-  const pdfFile = new File([blob], 'RHDocScan_Documento.pdf', { type: 'application/pdf' });
+  let metadata: DocumentMetadata | undefined;
+  if (includeMetadata) {
+    metadata = await collectDocumentMetadata(pages, 'jpg');
+  }
 
-  // 1. Probar Web Share API Nivel 2 (Nativo de iOS y Android)
+  // Si hay una sola página y no hay metadatos, exportar directamente
+  if (pages.length === 1 && !includeMetadata) {
+    const res = await fetch(pages[0].warpedDataUrl);
+    const blob = await res.blob();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    return { blob, fileName: `RHDocScan_${timestamp}.jpg`, metadata };
+  }
+
+  // Si hay múltiples páginas o metadatos, coserlas verticalmente en una imagen de rollo continua
+  const loadedImgs: HTMLImageElement[] = [];
+  const imgUrls = pages.map((p) => p.warpedDataUrl);
+  if (includeMetadata && metadata) {
+    imgUrls.push(generateAuditPageDataUrl(metadata));
+  }
+
+  await Promise.all(
+    imgUrls.map(
+      (url) =>
+        new Promise<void>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            loadedImgs.push(img);
+            resolve();
+          };
+          img.onerror = () => resolve();
+          img.src = url;
+        })
+    )
+  );
+
+  const canvas = document.createElement('canvas');
+  const width = 1240;
+  const singleHeight = 1754;
+  canvas.width = width;
+  canvas.height = singleHeight * loadedImgs.length;
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    loadedImgs.forEach((img, idx) => {
+      ctx.drawImage(img, 0, idx * singleHeight, width, singleHeight);
+    });
+  }
+
+  const blob = await new Promise<Blob>((resolve) => {
+    canvas.toBlob((b) => resolve(b || new Blob()), 'image/jpeg', 0.92);
+  });
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return { blob, fileName: `RHDocScan_${timestamp}.jpg`, metadata };
+}
+
+/**
+ * Comparte o descarga el archivo según el formato elegido (PDF o JPG)
+ */
+export async function shareOrDownloadDocument(
+  pages: ScannedPage[],
+  format: ExportFormat = 'pdf',
+  includeMetadata: boolean = false
+): Promise<ExportResult> {
+  const { blob, fileName, metadata } =
+    format === 'pdf'
+      ? await generatePdfBlob(pages, includeMetadata)
+      : await generateJpgBlob(pages, includeMetadata);
+
+  const mimeType = format === 'pdf' ? 'application/pdf' : 'image/jpeg';
+  const file = new File([blob], fileName, { type: mimeType });
+
+  // 1. Probar Web Share API Nivel 2
   if (typeof navigator !== 'undefined' && 'canShare' in navigator && 'share' in navigator) {
     try {
       const shareData = {
-        title: 'RHDocScan_Documento.pdf',
-        text: 'Documento escaneado de forma 100% privada y procesado localmente con RHDocScan.',
-        files: [pdfFile],
+        title: fileName,
+        text: `Documento escaneado de forma 100% privada con RHDocScan (${(format || 'pdf').toUpperCase()}).`,
+        files: [file],
       };
 
       if (navigator.canShare(shareData)) {
@@ -77,33 +162,38 @@ export async function shareOrDownloadPdf(pages: ScannedPage[]): Promise<ShareRes
           sharedViaNativeSheet: true,
           downloadTriggered: false,
           fileName,
+          format,
+          metadata,
         };
       }
     } catch (shareError: unknown) {
       const error = shareError as Error;
-      // Si el usuario canceló la hoja nativa de compartir, no forzar descarga
       if (error.name === 'AbortError') {
         return {
           sharedViaNativeSheet: true,
           downloadTriggered: false,
           fileName,
+          format,
+          metadata,
         };
       }
-      console.warn('Web Share API falló, usando descarga de respaldo:', error);
+      console.warn('Web Share API falló, ejecutando descarga de respaldo:', error);
     }
   }
 
-  // 2. Respaldo: Descarga directa al almacenamiento del dispositivo
+  // 2. Respaldo: Descarga directa al teléfono
   downloadBlobDirectly(blob, fileName);
   return {
     sharedViaNativeSheet: false,
     downloadTriggered: true,
     fileName,
+    format,
+    metadata,
   };
 }
 
 /**
- * Descarga directa del archivo en el dispositivo
+ * Descarga directa de archivo Blob
  */
 export function downloadBlobDirectly(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);

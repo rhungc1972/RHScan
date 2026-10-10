@@ -1,7 +1,7 @@
 // src/services/usageTracker.ts
-// Gestión de límites diarios, persistencia local y cuenta regresiva a medianoche
+// Gestión de límites diarios, claves mensuales y persistencia local
 
-import { ScanTrackerState } from '../types';
+import { ScanTrackerState, RegisteredUserRecord } from '../types';
 
 const STORAGE_KEY = 'scan_tracker';
 export const ANONYMOUS_DAILY_LIMIT = 3;
@@ -19,17 +19,28 @@ export function getLocalDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
+const DEFAULT_USERS: RegisteredUserRecord[] = [
+  { id: 'usr_1', name: 'Roberto Hernández', email: 'rhungc@gmail.com', registeredAt: '2026-10-08 09:30' },
+  { id: 'usr_2', name: 'Laura Gómez', email: 'laura.gomez@notaria21.com', registeredAt: '2026-10-09 11:15' },
+  { id: 'usr_3', name: 'Carlos Morales', email: 'cmorales@legalgroup.pe', registeredAt: '2026-10-09 16:42' },
+];
+
 /**
  * Carga o inicializa el estado del rastreador desde localStorage
  */
 export function getUsageState(): ScanTrackerState {
   const today = getLocalDateString();
+  const currentMonth = new Date().getMonth() + 1;
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed: ScanTrackerState = JSON.parse(raw);
+      const userList = parsed.registeredUsersList && parsed.registeredUsersList.length > 0
+        ? parsed.registeredUsersList
+        : DEFAULT_USERS;
+
       // Si la fecha guardada es de un día anterior, reiniciamos el conteo a 0
-      // pero conservamos el estado de registro y datos del usuario
       if (parsed.date !== today) {
         const resetState: ScanTrackerState = {
           date: today,
@@ -37,10 +48,19 @@ export function getUsageState(): ScanTrackerState {
           isRegistered: Boolean(parsed.isRegistered),
           userEmail: parsed.userEmail || '',
           userName: parsed.userName || '',
+          registeredAt: parsed.registeredAt || '',
+          unlimitedUntilMonth: parsed.unlimitedUntilMonth === currentMonth ? currentMonth : undefined,
+          registeredUsersList: userList,
         };
         saveUsageState(resetState);
         return resetState;
       }
+
+      if (!parsed.registeredUsersList) {
+        parsed.registeredUsersList = userList;
+        saveUsageState(parsed);
+      }
+
       return parsed;
     }
   } catch (e) {
@@ -54,6 +74,7 @@ export function getUsageState(): ScanTrackerState {
     isRegistered: false,
     userEmail: '',
     userName: '',
+    registeredUsersList: DEFAULT_USERS,
   };
   saveUsageState(defaultState);
   return defaultState;
@@ -88,20 +109,53 @@ export function incrementScanCount(): ScanTrackerState {
  */
 export function setRegisteredUser(name: string, email: string): ScanTrackerState {
   const current = getUsageState();
+  const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+
+  const newUser: RegisteredUserRecord = {
+    id: 'usr_' + Date.now(),
+    name,
+    email,
+    registeredAt: nowStr,
+  };
+
+  const existingList = current.registeredUsersList || [];
+  const updatedList = existingList.some(u => u.email === email)
+    ? existingList
+    : [newUser, ...existingList];
+
   const updated: ScanTrackerState = {
     ...current,
     isRegistered: true,
     userName: name,
     userEmail: email,
+    registeredAt: nowStr,
+    registeredUsersList: updatedList,
   };
   saveUsageState(updated);
   return updated;
 }
 
 /**
- * Comprueba si el usuario tiene cupo disponible hoy
+ * Activa acceso ilimitado para el mes especificado mediante clave mensual
+ */
+export function setUnlimitedMonth(month: number): ScanTrackerState {
+  const current = getUsageState();
+  const updated: ScanTrackerState = {
+    ...current,
+    unlimitedUntilMonth: month,
+  };
+  saveUsageState(updated);
+  return updated;
+}
+
+/**
+ * Comprueba si el usuario tiene cupo disponible hoy (o acceso ilimitado)
  */
 export function hasQuotaAvailable(state: ScanTrackerState): boolean {
+  const currentMonth = new Date().getMonth() + 1;
+  if (state.unlimitedUntilMonth === currentMonth) {
+    return true; // Acceso ilimitado por clave mensual
+  }
   const maxLimit = state.isRegistered ? REGISTERED_DAILY_LIMIT : ANONYMOUS_DAILY_LIMIT;
   return state.count < maxLimit;
 }
@@ -115,7 +169,22 @@ export function getQuotaInfo(state: ScanTrackerState): {
   remaining: number;
   isRegistered: boolean;
   isExceeded: boolean;
+  isUnlimited: boolean;
 } {
+  const currentMonth = new Date().getMonth() + 1;
+  const isUnlimited = state.unlimitedUntilMonth === currentMonth;
+
+  if (isUnlimited) {
+    return {
+      used: state.count,
+      max: 999,
+      remaining: 999,
+      isRegistered: true,
+      isExceeded: false,
+      isUnlimited: true,
+    };
+  }
+
   const max = state.isRegistered ? REGISTERED_DAILY_LIMIT : ANONYMOUS_DAILY_LIMIT;
   const remaining = Math.max(0, max - state.count);
   return {
@@ -124,11 +193,12 @@ export function getQuotaInfo(state: ScanTrackerState): {
     remaining,
     isRegistered: state.isRegistered,
     isExceeded: state.count >= max,
+    isUnlimited: false,
   };
 }
 
 /**
- * Calcula los milisegundos restantes hasta la medianoche local (00:00:00 del día siguiente)
+ * Calcula los milisegundos restantes hasta la medianoche local
  */
 export function getMsUntilMidnight(): number {
   const now = new Date();
@@ -137,7 +207,7 @@ export function getMsUntilMidnight(): number {
 }
 
 /**
- * Formatea el tiempo restante en formato HHh MMm SSs
+ * Formatea el tiempo restante en formato HH:MM:SS o HHh MMm SSs
  */
 export function formatCountdown(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -151,4 +221,3 @@ export function formatCountdown(ms: number): string {
 
   return `${hStr}h ${mStr}m ${sStr}s`;
 }
-

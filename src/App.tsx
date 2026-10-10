@@ -10,12 +10,14 @@ import { DocumentReviewModal } from './components/DocumentReviewModal';
 import { SettingsModal } from './components/SettingsModal';
 import { RegistrationModal } from './components/RegistrationModal';
 import { QuotaExceededBanner } from './components/QuotaExceededBanner';
+import { FeedbackModal } from './components/FeedbackModal';
 import {
   Quad,
   ScanMode,
   ScanFilter,
   ScannedPage,
   ScanTrackerState,
+  ExportFormat,
 } from './types';
 import {
   getUsageState,
@@ -34,6 +36,7 @@ export default function App() {
   const [pages, setPages] = useState<ScannedPage[]>([]);
   const [scanMode, setScanMode] = useState<ScanMode>('manual');
   const [preferredFilter, setPreferredFilter] = useState<ScanFilter>('color');
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('pdf');
 
   // Estado de modales y flujo
   const [capturedImage, setCapturedImage] = useState<{
@@ -46,6 +49,7 @@ export default function App() {
   const [isReviewOpen, setIsReviewOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isRegistrationOpen, setIsRegistrationOpen] = useState<boolean>(false);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState<boolean>(false);
 
   // Comprobar periódicamente cambio de día a medianoche
   useEffect(() => {
@@ -154,6 +158,8 @@ export default function App() {
         scanMode={scanMode}
         onToggleScanMode={setScanMode}
         preferredFilter={preferredFilter}
+        exportFormat={exportFormat}
+        onChangeExportFormat={setExportFormat}
       />
 
       {/* BANNER EN CASO DE CUPO EXCEDIDO CON CUENTA REGRESIVA */}
@@ -181,11 +187,14 @@ export default function App() {
         <DocumentReviewModal
           pages={pages}
           maxPages={MAX_PAGES_PER_DOCUMENT}
+          exportFormat={exportFormat}
+          onChangeExportFormat={setExportFormat}
           onClose={() => setIsReviewOpen(false)}
           onAddMorePages={() => setIsReviewOpen(false)}
           onDeletePage={handleDeletePage}
           onRotatePage={handleRotatePage}
           onCompleteScan={handleCompleteScan}
+          onOpenFeedback={() => setIsFeedbackOpen(true)}
         />
       )}
 
@@ -206,6 +215,11 @@ export default function App() {
           onClose={() => setIsRegistrationOpen(false)}
           onSuccess={handleRegistrationSuccess}
         />
+      )}
+
+      {/* MODAL DE COMENTARIOS Y SUGERENCIAS */}
+      {isFeedbackOpen && (
+        <FeedbackModal onClose={() => setIsFeedbackOpen(false)} />
       )}
     </div>
   );

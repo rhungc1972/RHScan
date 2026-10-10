@@ -516,14 +516,14 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
           </button>
         )}
 
-        {/* Botón: Terminar y Guardar */}
+        {/* Botón de avance con el texto exacto: Continuar */}
         <button
           onClick={() => handleConfirmSave(false)}
           disabled={isProcessing}
           className="flex-1 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs tracking-wide transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/25 active:scale-95"
         >
           <Check className="w-4 h-4" />
-          <span>{isProcessing ? 'Procesando...' : 'Guardar Página'}</span>
+          <span>{isProcessing ? 'Procesando...' : 'Continuar'}</span>
         </button>
       </div>
     </div>

@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { DocumentDetector, calculateFolioQuad, sensorToScreenPoint } from '../utils/cvEngine';
 import { playShutterSound, playFocusLockTone } from '../utils/audioFeedback';
-import { Quad, ScanMode, ScannedPage, ScanFilter } from '../types';
+import { Quad, ScanMode, ScannedPage, ScanFilter, ExportFormat } from '../types';
 
 interface CameraViewProps {
   onCaptureFrame: (imageDataUrl: string, detectedQuad: Quad, width: number, height: number) => void;
@@ -31,6 +31,8 @@ interface CameraViewProps {
   scanMode: ScanMode;
   onToggleScanMode: (mode: ScanMode) => void;
   preferredFilter: ScanFilter;
+  exportFormat?: ExportFormat;
+  onChangeExportFormat?: (format: ExportFormat) => void;
 }
 
 export const CameraView: React.FC<CameraViewProps> = ({
@@ -42,6 +44,8 @@ export const CameraView: React.FC<CameraViewProps> = ({
   isQuotaExceeded,
   scanMode,
   onToggleScanMode,
+  exportFormat = 'pdf',
+  onChangeExportFormat,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hudCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -442,6 +446,32 @@ export const CameraView: React.FC<CameraViewProps> = ({
             <span className="font-extrabold text-sm tracking-tight text-white leading-none">RHDocScan</span>
             <span className="text-[10px] text-emerald-400 font-medium tracking-wider">Zero-Knowledge</span>
           </div>
+        </div>
+
+        {/* Selector de formato: [PDF (predeterminado) | JPG] */}
+        <div className="flex items-center rounded-xl bg-slate-900/80 p-0.5 border border-white/10 backdrop-blur shadow-sm">
+          <button
+            type="button"
+            onClick={() => onChangeExportFormat?.('pdf')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+              (exportFormat || 'pdf') === 'pdf'
+                ? 'bg-emerald-500 text-slate-950 shadow'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => onChangeExportFormat?.('jpg')}
+            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+              exportFormat === 'jpg'
+                ? 'bg-emerald-500 text-slate-950 shadow'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            JPG
+          </button>
         </div>
 
         {/* Acciones superiores */}
