@@ -200,19 +200,33 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
   const generateProcessedPage = async (): Promise<ScannedPage> => {
     setIsProcessing(true);
     try {
-      const img = imageRef.current;
-      if (!img) throw new Error('Imagen fuente no disponible');
+      // Cargar la imagen fuente de forma asíncrona garantizando dimensiones reales completas
+      const sourceImg = new Image();
+      sourceImg.crossOrigin = 'anonymous';
+      sourceImg.src = capturedImage.dataUrl;
 
-      // Escalar esquinas normalizadas a píxeles absolutos
+      await new Promise<void>((resolve, reject) => {
+        if (sourceImg.complete && (sourceImg.naturalWidth > 0 || sourceImg.width > 0)) {
+          resolve();
+        } else {
+          sourceImg.onload = () => resolve();
+          sourceImg.onerror = () => reject(new Error('Error cargando fotograma fuente'));
+        }
+      });
+
+      const fullW = sourceImg.naturalWidth || capturedImage.width || 1280;
+      const fullH = sourceImg.naturalHeight || capturedImage.height || 720;
+
+      // Escalar esquinas normalizadas [0..1] a píxeles absolutos reales de la imagen
       const absCorners: Quad = [
-        { x: corners[0].x * img.naturalWidth, y: corners[0].y * img.naturalHeight },
-        { x: corners[1].x * img.naturalWidth, y: corners[1].y * img.naturalHeight },
-        { x: corners[2].x * img.naturalWidth, y: corners[2].y * img.naturalHeight },
-        { x: corners[3].x * img.naturalWidth, y: corners[3].y * img.naturalHeight },
+        { x: corners[0].x * fullW, y: corners[0].y * fullH },
+        { x: corners[1].x * fullW, y: corners[1].y * fullH },
+        { x: corners[2].x * fullW, y: corners[2].y * fullH },
+        { x: corners[3].x * fullW, y: corners[3].y * fullH },
       ];
 
-      // 1. Warp perspective homográfico
-      const warpedBase = await warpPerspective(img, absCorners);
+      // 1. Warp perspective homográfico con sujeción de coordenadas
+      const warpedBase = await warpPerspective(sourceImg, absCorners);
 
       // 2. Aplicar filtro visual
       const filteredResult = await applyImageFilter(warpedBase, selectedFilter);
@@ -224,8 +238,8 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
         corners,
         filter: selectedFilter,
         timestamp: Date.now(),
-        width: img.naturalWidth,
-        height: img.naturalHeight,
+        width: fullW,
+        height: fullH,
         rotation: rotationAngle,
       };
 

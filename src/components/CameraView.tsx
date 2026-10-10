@@ -1,6 +1,6 @@
 // src/components/CameraView.tsx
-// Pantalla completa de cámara con HUD en tiempo real, detección de polígono,
-// auto-disparo con estabilidad de 800ms y selector de modo.
+// Pantalla completa de cámara con HUD en tiempo real, modo manual por defecto,
+// estabilización continua de 1.8s (indicador verde) y captura garantizada sin lienzo en blanco.
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
@@ -15,6 +15,7 @@ import {
   FileText,
   ShieldCheck,
   CheckCircle2,
+  Lock,
 } from 'lucide-react';
 import { DocumentDetector } from '../utils/cvEngine';
 import { playShutterSound, playFocusLockTone } from '../utils/audioFeedback';
@@ -52,9 +53,12 @@ export const CameraView: React.FC<CameraViewProps> = ({
   const [torchActive, setTorchActive] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
 
-  // Detección y estabilidad
+  // Detección y estabilidad estricta (1.8 segundos continuo)
   const [isStable, setIsStable] = useState<boolean>(false);
   const [stabilityProgress, setStabilityProgress] = useState<number>(0);
+  const [statusMessage, setStatusMessage] = useState<string>('Alinea el documento en el marco');
+  const [isProperlyLit, setIsProperlyLit] = useState<boolean>(true);
+
   const currentQuadRef = useRef<Quad>([
     { x: 0.12, y: 0.14 },
     { x: 0.88, y: 0.14 },
@@ -67,7 +71,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
   const isCapturingRef = useRef<boolean>(false);
   const prevStableStateRef = useRef<boolean>(false);
 
-  // Iniciar flujo de cámara
+  // Iniciar flujo de cámara con resolución nítida
   const startCamera = useCallback(async () => {
     setCameraError(null);
     if (stream) {
@@ -79,8 +83,8 @@ export const CameraView: React.FC<CameraViewProps> = ({
         audio: false,
         video: {
           facingMode: { ideal: facingMode },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
         },
       };
 
@@ -92,7 +96,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
         videoRef.current.play().catch(() => {});
       }
 
-      // Comprobar soporte de linterna (Torch)
+      // Soporte de linterna (Torch)
       const track = newStream.getVideoTracks()[0];
       const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as { torch?: boolean };
       setTorchAvailable(Boolean(capabilities && capabilities.torch));
@@ -116,7 +120,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     };
   }, [facingMode]);
 
-  // Alternar linterna / torch
+  // Alternar linterna / torch con tiempo de estabilización de exposición
   const toggleTorch = async () => {
     if (!stream || !torchAvailable) return;
     try {
@@ -131,27 +135,48 @@ export const CameraView: React.FC<CameraViewProps> = ({
     }
   };
 
-  // Capturar fotograma de alta resolución
+  // Captura garantizada de fotograma de alta resolución sin lienzo en blanco
   const triggerCapture = useCallback(() => {
     if (isCapturingRef.current || isQuotaExceeded) return;
     if (pages.length >= maxPages) return;
 
     const video = videoRef.current;
-    if (!video || video.readyState < 2) return;
+    if (!video) return;
+
+    // Validación estricta: el video debe estar decodificado y con dimensiones válidas > 0
+    if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+      console.warn('Video aún no ha decodificado el fotograma actual.');
+      return;
+    }
+
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh || vw <= 0 || vh <= 0) {
+      console.warn('Dimensiones de video nulas (0x0). Cancelando para evitar pantalla blanca.');
+      return;
+    }
 
     isCapturingRef.current = true;
     playShutterSound();
 
     try {
+      // Crear canvas con las dimensiones nativas exactas del sensor de cámara
       const captureCanvas = document.createElement('canvas');
-      captureCanvas.width = video.videoWidth || 1280;
-      captureCanvas.height = video.videoHeight || 720;
-      const ctx = captureCanvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-        const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.95);
-        onCaptureFrame(dataUrl, currentQuadRef.current, captureCanvas.width, captureCanvas.height);
+      captureCanvas.width = vw;
+      captureCanvas.height = vh;
+      const ctx = captureCanvas.getContext('2d', { willReadFrequently: true });
+
+      if (!ctx) {
+        throw new Error('No se pudo inicializar contexto 2D para captura');
       }
+
+      // Dibujar fotograma decodificado completo
+      ctx.drawImage(video, 0, 0, vw, vh);
+
+      // Exportar en JPEG de alta calidad
+      const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.95);
+
+      onCaptureFrame(dataUrl, currentQuadRef.current, vw, vh);
     } catch (e) {
       console.error('Error al capturar fotograma:', e);
     } finally {
@@ -173,93 +198,118 @@ export const CameraView: React.FC<CameraViewProps> = ({
     const processFrame = () => {
       if (!isRunning) return;
 
-      if (video.readyState >= 2 && !video.paused && !video.ended) {
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && !video.paused && !video.ended) {
         const vw = video.videoWidth;
         const vh = video.videoHeight;
-        const cw = hudCanvas.clientWidth;
-        const ch = hudCanvas.clientHeight;
 
-        if (hudCanvas.width !== cw || hudCanvas.height !== ch) {
-          hudCanvas.width = cw;
-          hudCanvas.height = ch;
-        }
+        if (vw > 0 && vh > 0) {
+          const cw = hudCanvas.clientWidth;
+          const ch = hudCanvas.clientHeight;
 
-        const ctx = hudCanvas.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, cw, ch);
-
-          // Analizar cuadro con CV
-          const analysis = detectorRef.current.analyzeFrame(video);
-          currentQuadRef.current = analysis.quad;
-          setIsStable(analysis.isStable);
-          setStabilityProgress(analysis.stabilityProgress);
-
-          // Tono de enfoque al estabilizarse
-          if (analysis.isStable && !prevStableStateRef.current) {
-            playFocusLockTone();
+          if (hudCanvas.width !== cw || hudCanvas.height !== ch) {
+            hudCanvas.width = cw;
+            hudCanvas.height = ch;
           }
-          prevStableStateRef.current = analysis.isStable;
 
-          // Dibujar cuadrilátero HUD
-          // Líneas amarillas: Documento detectado ajustando encuadre
-          // Líneas verdes + pulso visual: Documento estable y enfocado
-          const [tl, tr, br, bl] = analysis.quad;
-          const strokeColor = analysis.isStable ? '#10b981' : '#facc15';
-          const fillColor = analysis.isStable ? 'rgba(16, 185, 129, 0.12)' : 'rgba(250, 204, 21, 0.08)';
+          const ctx = hudCanvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, cw, ch);
 
-          ctx.save();
-          ctx.beginPath();
-          ctx.moveTo(tl.x * cw, tl.y * ch);
-          ctx.lineTo(tr.x * cw, tr.y * ch);
-          ctx.lineTo(br.x * cw, br.y * ch);
-          ctx.lineTo(bl.x * cw, bl.y * ch);
-          ctx.closePath();
+            // Analizar cuadro con CV y estabilidad continua de 1.8s
+            const analysis = detectorRef.current.analyzeFrame(video);
+            currentQuadRef.current = analysis.quad;
+            setIsStable(analysis.isStable);
+            setStabilityProgress(analysis.stabilityProgress);
+            setStatusMessage(analysis.statusMessage);
+            setIsProperlyLit(analysis.isProperlyLit);
 
-          ctx.fillStyle = fillColor;
-          ctx.fill();
+            // Tono de enfoque auditivo únicamente al alcanzar estabilidad continua
+            if (analysis.isStable && !prevStableStateRef.current) {
+              playFocusLockTone();
+            }
+            prevStableStateRef.current = analysis.isStable;
 
-          ctx.lineWidth = analysis.isStable ? 3.5 : 2.5;
-          ctx.strokeStyle = strokeColor;
-          ctx.lineCap = 'round';
-          ctx.lineJoin = 'round';
-          if (!analysis.isStable) {
-            ctx.setLineDash([8, 6]);
-          } else {
-            ctx.setLineDash([]);
-          }
-          ctx.stroke();
+            // Dibujar cuadrilátero HUD
+            // - Líneas amarillas punteadas: Documento detectado, estabilizando encuadre
+            // - Líneas verdes sólidas + pulso: Documento perfectamente estable (1.8s)
+            const [tl, tr, br, bl] = analysis.quad;
+            const strokeColor = analysis.isStable ? '#10b981' : '#facc15';
+            const fillColor = analysis.isStable ? 'rgba(16, 185, 129, 0.12)' : 'rgba(250, 204, 21, 0.06)';
 
-          // Marcadores de esquina L estilizados
-          const drawCorner = (pt: { x: number; y: number }) => {
-            const px = pt.x * cw;
-            const py = pt.y * ch;
-            const size = 16;
-            ctx.fillStyle = strokeColor;
+            ctx.save();
             ctx.beginPath();
-            ctx.arc(px, py, 5, 0, Math.PI * 2);
+            ctx.moveTo(tl.x * cw, tl.y * ch);
+            ctx.lineTo(tr.x * cw, tr.y * ch);
+            ctx.lineTo(br.x * cw, br.y * ch);
+            ctx.lineTo(bl.x * cw, bl.y * ch);
+            ctx.closePath();
+
+            ctx.fillStyle = fillColor;
             ctx.fill();
-          };
 
-          drawCorner(tl);
-          drawCorner(tr);
-          drawCorner(br);
-          drawCorner(bl);
+            ctx.lineWidth = analysis.isStable ? 3.5 : 2.0;
+            ctx.strokeStyle = strokeColor;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
 
-          // Indicador de estado centrado en el HUD
-          ctx.font = '600 13px "Plus Jakarta Sans", sans-serif';
-          ctx.textAlign = 'center';
-          const hudText = analysis.isStable
-            ? (scanMode === 'auto' ? '✓ Enfocado — Capturando...' : '✓ Documento Estable')
-            : 'Alinea el documento dentro del marco';
+            if (!analysis.isStable) {
+              ctx.setLineDash([8, 6]);
+            } else {
+              ctx.setLineDash([]);
+            }
+            ctx.stroke();
 
-          ctx.fillStyle = analysis.isStable ? '#10b981' : '#facc15';
-          ctx.fillText(hudText, cw / 2, tl.y * ch - 16 > 40 ? tl.y * ch - 16 : 40);
+            // Marcadores de esquina
+            const drawCorner = (pt: { x: number; y: number }) => {
+              const px = pt.x * cw;
+              const py = pt.y * ch;
+              ctx.fillStyle = strokeColor;
+              ctx.beginPath();
+              ctx.arc(px, py, analysis.isStable ? 6 : 4.5, 0, Math.PI * 2);
+              ctx.fill();
+            };
 
-          ctx.restore();
+            drawCorner(tl);
+            drawCorner(tr);
+            drawCorner(br);
+            drawCorner(bl);
 
-          // Auto-disparo en Modo Automático cuando se alcanza estabilidad continua
-          if (scanMode === 'auto' && analysis.isStable && !isCapturingRef.current && !isQuotaExceeded && pages.length < maxPages) {
-            triggerCapture();
+            // Barra de progreso de estabilidad sobre el borde superior del documento
+            if (!analysis.isStable && analysis.stabilityProgress > 0) {
+              const startX = tl.x * cw;
+              const startY = tl.y * ch - 8;
+              const endX = tr.x * cw;
+              const totalLen = Math.max(20, endX - startX);
+
+              ctx.strokeStyle = 'rgba(250, 204, 21, 0.25)';
+              ctx.lineWidth = 3;
+              ctx.setLineDash([]);
+              ctx.beginPath();
+              ctx.moveTo(startX, startY);
+              ctx.lineTo(startX + totalLen, startY);
+              ctx.stroke();
+
+              ctx.strokeStyle = '#10b981';
+              ctx.beginPath();
+              ctx.moveTo(startX, startY);
+              ctx.lineTo(startX + totalLen * analysis.stabilityProgress, startY);
+              ctx.stroke();
+            }
+
+            // Mensaje de estado en HUD
+            ctx.font = '600 13px "Plus Jakarta Sans", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = analysis.isStable ? '#10b981' : analysis.isProperlyLit ? '#facc15' : '#fb923c';
+            const textY = Math.max(38, tl.y * ch - 18);
+            ctx.fillText(analysis.statusMessage, cw / 2, textY);
+
+            ctx.restore();
+
+            // ÚNICAMENTE auto-disparar si el usuario activó deliberadamente el modo 'auto'
+            // Por defecto el modo es 'manual' y este bloque jamás se ejecuta.
+            if (scanMode === 'auto' && analysis.isStable && !isCapturingRef.current && !isQuotaExceeded && pages.length < maxPages) {
+              triggerCapture();
+            }
           }
         }
       }
@@ -277,7 +327,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     };
   }, [scanMode, triggerCapture, isQuotaExceeded, pages.length, maxPages]);
 
-  // Manejo de carga de imagen desde galería / archivo (fallback o prueba)
+  // Manejo de carga de imagen desde galería o archivo
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -293,7 +343,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
           { x: 0.9, y: 0.9 },
           { x: 0.1, y: 0.9 },
         ];
-        onCaptureFrame(dataUrl, defaultQuad, img.width, img.height);
+        onCaptureFrame(dataUrl, defaultQuad, img.naturalWidth || img.width, img.naturalHeight || img.height);
       };
       img.src = dataUrl;
     };
@@ -301,7 +351,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     e.target.value = '';
   };
 
-  // Generador de documento de prueba para testing instantáneo
+  // Generador de documento de prueba
   const handleLoadSampleDocument = () => {
     const sampleCanvas = document.createElement('canvas');
     sampleCanvas.width = 1240;
@@ -309,11 +359,9 @@ export const CameraView: React.FC<CameraViewProps> = ({
     const ctx = sampleCanvas.getContext('2d');
     if (!ctx) return;
 
-    // Fondo de papel crema sutil
     ctx.fillStyle = '#faf8f5';
     ctx.fillRect(0, 0, 1240, 1754);
 
-    // Borde de membrete
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(80, 80, 1080, 120);
 
@@ -321,7 +369,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
     ctx.font = 'bold 36px sans-serif';
     ctx.fillText('POCKETSCAN ZERO — DOCUMENTO DE PRUEBA', 120, 155);
 
-    // Contenido del documento
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 26px sans-serif';
     ctx.fillText('CERTIFICADO DE ARQUITECTURA ZERO-KNOWLEDGE', 100, 300);
@@ -331,13 +378,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
     const lines = [
       'Este documento demuestra el procesamiento 100% en el cliente de PocketScan Zero.',
       '• Ninguna imagen es enviada a servidores externos ni almacenada en la nube.',
-      '• La detección de perspectiva y corrección homográfica se ejecutan en RAM.',
-      '• Los filtros de binarización adaptativa Bradley-Roth limpian sombras locales.',
+      '• La captura se realiza de forma manual con estabilización de 1.8 segundos.',
+      '• La corrección homográfica se calcula en RAM sin generar pantallas en blanco.',
+      '• Los filtros de binarización adaptativa limpian sombras locales sin blanquear.',
       '• La compilación de PDF se realiza en memoria utilizando la librería jsPDF.',
-      '• La función de compartir invoca de forma nativa la Web Share API del sistema móvil.',
       '',
-      'Fecha de emisión: ' + new Date().toLocaleDateString('es-ES'),
-      'Identificador criptográfico: PSZ-' + Math.floor(100000 + Math.random() * 900000),
+      'Fecha: ' + new Date().toLocaleDateString('es-ES'),
+      'Identificador: PSZ-' + Math.floor(100000 + Math.random() * 900000),
     ];
 
     let y = 360;
@@ -346,7 +393,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
       y += 42;
     });
 
-    // Sello gráfico
     ctx.strokeStyle = '#10b981';
     ctx.lineWidth = 6;
     ctx.strokeRect(780, 800, 360, 160);
@@ -472,21 +518,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
       )}
 
       {/* BARRA INFERIOR DE CONTROLES */}
-      <div className="absolute bottom-0 inset-x-0 z-20 pb-safe px-safe pt-4 bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col items-center gap-4">
-        {/* Selector discreto de modo [Automático | Manual] y Contador de Páginas */}
+      <div className="absolute bottom-0 inset-x-0 z-20 pb-safe px-safe pt-4 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col items-center gap-3">
+        {/* Selector de modo y Contador de Páginas */}
         <div className="flex items-center justify-between w-full max-w-sm px-2">
-          {/* Selector de modo */}
+          {/* Selector de modo: Manual (por defecto) vs Automático */}
           <div className="flex items-center p-0.5 rounded-full glass-panel text-xs font-semibold">
-            <button
-              onClick={() => onToggleScanMode('auto')}
-              className={`px-3 py-1.5 rounded-full transition ${
-                scanMode === 'auto'
-                  ? 'bg-emerald-500 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Automático
-            </button>
             <button
               onClick={() => onToggleScanMode('manual')}
               className={`px-3 py-1.5 rounded-full transition ${
@@ -497,6 +533,16 @@ export const CameraView: React.FC<CameraViewProps> = ({
             >
               Manual
             </button>
+            <button
+              onClick={() => onToggleScanMode('auto')}
+              className={`px-3 py-1.5 rounded-full transition ${
+                scanMode === 'auto'
+                  ? 'bg-emerald-500 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Automático
+            </button>
           </div>
 
           {/* Contador de páginas */}
@@ -506,9 +552,23 @@ export const CameraView: React.FC<CameraViewProps> = ({
           </div>
         </div>
 
-        {/* Fila central: Galería/Muestra | OBTURADOR | Terminar y Compartir */}
+        {/* Mensaje de guía dinámico bajo el selector */}
+        <div className="text-center text-[11px] font-medium tracking-wide">
+          {isStable ? (
+            <span className="text-emerald-400 flex items-center justify-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Marco listo — Presiona el botón para capturar
+            </span>
+          ) : (
+            <span className="text-slate-400">
+              {statusMessage}
+            </span>
+          )}
+        </div>
+
+        {/* Fila central: Galería | OBTURADOR MANUAL | Terminar y Compartir */}
         <div className="flex items-center justify-between w-full max-w-sm px-4 pb-2">
-          {/* Botón izquierdo: Cargar imagen o documento de prueba */}
+          {/* Botón izquierdo: Cargar imagen desde archivo */}
           <div className="w-16 flex items-center justify-center">
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -519,34 +579,33 @@ export const CameraView: React.FC<CameraViewProps> = ({
             </button>
           </div>
 
-          {/* OBTURADOR CENTRAL AMPLIO Y REACTIVO */}
+          {/* OBTURADOR CENTRAL MANUAL CON ANILLO DE ESTABILIZACIÓN TEMPORAL (1.8s) */}
           <div className="relative flex items-center justify-center">
-            {/* Anillo de progreso en modo automático */}
-            {scanMode === 'auto' && stabilityProgress > 0 && (
-              <svg className="absolute -inset-2.5 w-24 h-24 -rotate-90 pointer-events-none">
-                <circle
-                  cx="48"
-                  cy="48"
-                  r="40"
-                  fill="none"
-                  stroke="rgba(16, 185, 129, 0.2)"
-                  strokeWidth="4"
-                />
-                <circle
-                  cx="48"
-                  cy="48"
-                  r="40"
-                  fill="none"
-                  stroke="#10b981"
-                  strokeWidth="4"
-                  strokeDasharray="251.2"
-                  strokeDashoffset={251.2 * (1 - stabilityProgress)}
-                  strokeLinecap="round"
-                  className="transition-all duration-100"
-                />
-              </svg>
-            )}
+            {/* Anillo de progreso de estabilidad continuo (0% a 100% en 1.8 segundos) */}
+            <svg className="absolute -inset-3 w-26 h-26 -rotate-90 pointer-events-none">
+              <circle
+                cx="52"
+                cy="52"
+                r="44"
+                fill="none"
+                stroke="rgba(255, 255, 255, 0.1)"
+                strokeWidth="4"
+              />
+              <circle
+                cx="52"
+                cy="52"
+                r="44"
+                fill="none"
+                stroke={isStable ? '#10b981' : '#facc15'}
+                strokeWidth="4"
+                strokeDasharray="276.4"
+                strokeDashoffset={276.4 * (1 - stabilityProgress)}
+                strokeLinecap="round"
+                className="transition-all duration-100"
+              />
+            </svg>
 
+            {/* Botón de Obturador Manual */}
             <button
               disabled={isQuotaExceeded || pages.length >= maxPages}
               onClick={triggerCapture}
@@ -554,20 +613,26 @@ export const CameraView: React.FC<CameraViewProps> = ({
                 isQuotaExceeded || pages.length >= maxPages
                   ? 'bg-slate-800/80 border-2 border-slate-700 cursor-not-allowed opacity-60'
                   : isStable
-                  ? 'bg-emerald-500/20 border-3 border-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.5)]'
-                  : 'bg-white/10 border-3 border-white shadow-xl'
+                  ? 'bg-emerald-500/25 border-3 border-emerald-400 shadow-[0_0_28px_rgba(16,185,129,0.65)] scale-105'
+                  : 'bg-white/10 border-2 border-slate-400 hover:border-white shadow-lg'
               }`}
-              title="Capturar Documento"
+              title={isStable ? 'Capturar Documento' : 'Mantén estable el marco o pulsa para capturar'}
             >
               <div
-                className={`w-full h-full rounded-full transition-transform ${
+                className={`w-full h-full rounded-full transition-all duration-200 flex items-center justify-center ${
                   isQuotaExceeded || pages.length >= maxPages
                     ? 'bg-slate-700'
                     : isStable
-                    ? 'bg-emerald-400 scale-95'
-                    : 'bg-white'
+                    ? 'bg-emerald-400 shadow-inner'
+                    : 'bg-white/90'
                 }`}
-              />
+              >
+                {!isStable && stabilityProgress < 1 && (
+                  <span className="text-[10px] font-mono-numbers font-bold text-slate-800">
+                    {Math.round(stabilityProgress * 100)}%
+                  </span>
+                )}
+              </div>
             </button>
           </div>
 

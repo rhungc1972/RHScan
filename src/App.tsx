@@ -32,8 +32,8 @@ export default function App() {
 
   // Estado del documento actual (multi-página)
   const [pages, setPages] = useState<ScannedPage[]>([]);
-  const [scanMode, setScanMode] = useState<ScanMode>('auto');
-  const [preferredFilter, setPreferredFilter] = useState<ScanFilter>('binary');
+  const [scanMode, setScanMode] = useState<ScanMode>('manual');
+  const [preferredFilter, setPreferredFilter] = useState<ScanFilter>('color');
 
   // Estado de modales y flujo
   const [capturedImage, setCapturedImage] = useState<{

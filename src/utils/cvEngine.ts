@@ -1,15 +1,14 @@
 // src/utils/cvEngine.ts
 // Motor de Visión por Computadora 100% en el Navegador (Zero-Knowledge)
-// Detección de bordes, seguimiento de estabilidad, Homografía Proyectiva y Binarización Adaptativa.
+// Detección de bordes, suavizado temporal, estabilidad estricta (1.8s), Homografía Proyectiva robusta y Binarización Adaptativa.
 
 import { Point, Quad, ScanFilter } from '../types';
 
 /**
- * Resuelve el sistema lineal 8x8 para encontrar la matriz de homografía 3x3
+ * Resuelve el sistema lineal 8x8 para encontrar la matriz de homografía 3x3 normalizada
  * Mapea 4 puntos origen a 4 puntos destino.
  */
 function getProjectiveTransform(src: Quad, dst: Quad): number[] {
-  // Matriz A 8x8 y vector b 8x1
   const A: number[][] = [];
   const b: number[] = [];
 
@@ -67,34 +66,7 @@ function getProjectiveTransform(src: Quad, dst: Quad): number[] {
     x[i] = sum / (A[i][i] || 1e-8);
   }
 
-  // Matriz H [h00, h01, h02, h10, h11, h12, h20, h21, 1]
   return [x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], 1];
-}
-
-/**
- * Invierte una matriz 3x3
- */
-function invert3x3(m: number[]): number[] {
-  const [a, b, c, d, e, f, g, h, i] = m;
-  const A = e * i - f * h;
-  const B = -(d * i - f * g);
-  const C = d * h - e * g;
-  const D = -(b * i - c * h);
-  const E = a * i - c * g;
-  const F = -(a * h - b * g);
-  const G = b * f - c * e;
-  const H = -(a * f - c * d);
-  const I = a * e - b * d;
-
-  const det = a * A + b * B + c * C;
-  if (Math.abs(det) < 1e-12) return [1, 0, 0, 0, 1, 0, 0, 0, 1];
-
-  const invDet = 1.0 / det;
-  return [
-    A * invDet, D * invDet, G * invDet,
-    B * invDet, E * invDet, H * invDet,
-    C * invDet, F * invDet, I * invDet,
-  ];
 }
 
 /**
@@ -107,7 +79,9 @@ export function pointDistance(p1: Point, p2: Point): number {
 }
 
 /**
- * Corrige y endereza la perspectiva (Warp Perspective) de una imagen fuente dada una cuadrícula de 4 puntos.
+ * Corrige y endereza la perspectiva (Warp Perspective) de una imagen fuente
+ * Resuelve el bug de pantalla blanca garantizando dimensiones reales (naturalWidth/naturalHeight)
+ * y limitando las coordenadas de muestreo para evitar áreas vacías o corruptas.
  */
 export async function warpPerspective(
   sourceImage: HTMLImageElement | HTMLCanvasElement,
@@ -115,7 +89,19 @@ export async function warpPerspective(
   outputWidth?: number,
   outputHeight?: number
 ): Promise<string> {
-  // Calcular dimensiones proporcionales si no se especifican
+  // 1. Obtener dimensiones intrínsecas reales sin depender de estilos CSS
+  const sw = sourceImage instanceof HTMLImageElement
+    ? (sourceImage.naturalWidth || sourceImage.width)
+    : sourceImage.width;
+  const sh = sourceImage instanceof HTMLImageElement
+    ? (sourceImage.naturalHeight || sourceImage.height)
+    : sourceImage.height;
+
+  if (!sw || !sh || sw <= 0 || sh <= 0) {
+    throw new Error('Dimensiones inválidas en la imagen fuente para corrección de perspectiva');
+  }
+
+  // 2. Calcular dimensiones destino
   const [tl, tr, br, bl] = corners;
   const widthTop = pointDistance(tl, tr);
   const widthBottom = pointDistance(bl, br);
@@ -125,7 +111,7 @@ export async function warpPerspective(
   const avgWidth = Math.max(widthTop, widthBottom);
   const avgHeight = Math.max(heightLeft, heightRight);
 
-  // Relación estándar A4 aproximada (1 : 1.414) o calculada
+  // Proporción A4 estándar (1 : 1.414) o calculada
   const targetW = Math.round(outputWidth || Math.max(800, avgWidth));
   const targetH = Math.round(outputHeight || Math.max(1130, avgHeight));
 
@@ -136,22 +122,21 @@ export async function warpPerspective(
     { x: 0, y: targetH },
   ];
 
-  // Matriz de mapeo: Destino -> Origen para muestreo inverso
+  // Matriz de mapeo proyectivo: Destino -> Origen para muestreo inverso
   const H = getProjectiveTransform(dstQuad, corners);
 
-  // Obtener píxeles de la imagen original
+  // 3. Renderizar imagen original en un canvas del tamaño nativo exacto
   const srcCanvas = document.createElement('canvas');
-  srcCanvas.width = sourceImage.width;
-  srcCanvas.height = sourceImage.height;
+  srcCanvas.width = sw;
+  srcCanvas.height = sh;
   const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
-  if (!srcCtx) throw new Error('No se pudo inicializar canvas 2D');
-  srcCtx.drawImage(sourceImage, 0, 0);
-  const srcImgData = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
-  const srcData = srcImgData.data;
-  const sw = srcCanvas.width;
-  const sh = srcCanvas.height;
+  if (!srcCtx) throw new Error('No se pudo inicializar canvas 2D de lectura');
 
-  // Canvas destino
+  srcCtx.drawImage(sourceImage, 0, 0, sw, sh);
+  const srcImgData = srcCtx.getImageData(0, 0, sw, sh);
+  const srcData = srcImgData.data;
+
+  // 4. Canvas destino para el documento enderezado
   const dstCanvas = document.createElement('canvas');
   dstCanvas.width = targetW;
   dstCanvas.height = targetH;
@@ -160,56 +145,53 @@ export async function warpPerspective(
   const dstImgData = dstCtx.createImageData(targetW, targetH);
   const dstData = dstImgData.data;
 
-  // Mapeo inverso píxel por píxel con interpolación bilineal
+  // 5. Mapeo inverso píxel por píxel con interpolación bilineal y sujeción de bordes (clamping)
   let dstIdx = 0;
   for (let dy = 0; dy < targetH; dy++) {
     for (let dx = 0; dx < targetW; dx++) {
-      // Proyección homogénea
       const denom = H[6] * dx + H[7] * dy + H[8] || 1e-8;
-      const sx = (H[0] * dx + H[1] * dy + H[2]) / denom;
-      const sy = (H[3] * dx + H[4] * dy + H[5]) / denom;
+      let sx = (H[0] * dx + H[1] * dy + H[2]) / denom;
+      let sy = (H[3] * dx + H[4] * dy + H[5]) / denom;
 
-      if (sx >= 0 && sx < sw - 1 && sy >= 0 && sy < sh - 1) {
-        const x0 = Math.floor(sx);
-        const y0 = Math.floor(sy);
-        const x1 = x0 + 1;
-        const y1 = y0 + 1;
-        const fx = sx - x0;
-        const fy = sy - y0;
-        const w00 = (1 - fx) * (1 - fy);
-        const w10 = fx * (1 - fy);
-        const w01 = (1 - fx) * fy;
-        const w11 = fx * fy;
+      // Sujetar coordenadas al rango válido en lugar de rellenar con blanco puro
+      sx = Math.max(0, Math.min(sw - 1.001, sx));
+      sy = Math.max(0, Math.min(sh - 1.001, sy));
 
-        const i00 = (y0 * sw + x0) * 4;
-        const i10 = (y0 * sw + x1) * 4;
-        const i01 = (y1 * sw + x0) * 4;
-        const i11 = (y1 * sw + x1) * 4;
+      const x0 = Math.floor(sx);
+      const y0 = Math.floor(sy);
+      const x1 = Math.min(sw - 1, x0 + 1);
+      const y1 = Math.min(sh - 1, y0 + 1);
 
-        dstData[dstIdx] = Math.round(srcData[i00] * w00 + srcData[i10] * w10 + srcData[i01] * w01 + srcData[i11] * w11);
-        dstData[dstIdx + 1] = Math.round(srcData[i00 + 1] * w00 + srcData[i10 + 1] * w10 + srcData[i01 + 1] * w01 + srcData[i11 + 1] * w11);
-        dstData[dstIdx + 2] = Math.round(srcData[i00 + 2] * w00 + srcData[i10 + 2] * w10 + srcData[i01 + 2] * w01 + srcData[i11 + 2] * w11);
-        dstData[dstIdx + 3] = 255;
-      } else {
-        // Fuera de bordes: blanco puro
-        dstData[dstIdx] = 255;
-        dstData[dstIdx + 1] = 255;
-        dstData[dstIdx + 2] = 255;
-        dstData[dstIdx + 3] = 255;
-      }
+      const fx = sx - x0;
+      const fy = sy - y0;
+      const w00 = (1 - fx) * (1 - fy);
+      const w10 = fx * (1 - fy);
+      const w01 = (1 - fx) * fy;
+      const w11 = fx * fy;
+
+      const i00 = (y0 * sw + x0) * 4;
+      const i10 = (y0 * sw + x1) * 4;
+      const i01 = (y1 * sw + x0) * 4;
+      const i11 = (y1 * sw + x1) * 4;
+
+      dstData[dstIdx] = Math.round(srcData[i00] * w00 + srcData[i10] * w10 + srcData[i01] * w01 + srcData[i11] * w11);
+      dstData[dstIdx + 1] = Math.round(srcData[i00 + 1] * w00 + srcData[i10 + 1] * w10 + srcData[i01 + 1] * w01 + srcData[i11 + 1] * w11);
+      dstData[dstIdx + 2] = Math.round(srcData[i00 + 2] * w00 + srcData[i10 + 2] * w10 + srcData[i01 + 2] * w01 + srcData[i11 + 2] * w11);
+      dstData[dstIdx + 3] = 255;
+
       dstIdx += 4;
     }
   }
 
   dstCtx.putImageData(dstImgData, 0, 0);
-  return dstCanvas.toDataURL('image/jpeg', 0.92);
+  return dstCanvas.toDataURL('image/jpeg', 0.95);
 }
 
 /**
  * Aplica filtros de procesamiento visual:
  * - 'color': Realce sutil y balance de contraste
  * - 'grayscale': Conversión monocromática ponderada
- * - 'binary': Binarización adaptativa local (Bradley-Roth) para textos hiper-nítidos
+ * - 'binary': Binarización adaptativa local con salvaguarda contra pantallas blancas
  */
 export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter): Promise<string> {
   if (filter === 'color') return imageDataUrl;
@@ -219,22 +201,21 @@ export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter)
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) {
         resolve(imageDataUrl);
         return;
       }
 
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
       const w = canvas.width;
       const h = canvas.height;
 
       if (filter === 'grayscale') {
-        // Escala de grises con estiramiento de contraste
         let minLum = 255;
         let maxLum = 0;
         const lums = new Uint8Array(w * h);
@@ -254,10 +235,10 @@ export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter)
           data[i + 2] = stretched;
         }
       } else if (filter === 'binary') {
-        // Binarización Adaptativa Bradley-Roth (Integral Image)
-        // Crea imagen integral para calcular media local en O(1)
+        // Binarización Adaptativa Bradley-Roth con salvaguarda anti-blanqueo
         const intImg = new Float64Array(w * h);
         const lums = new Uint8Array(w * h);
+        let totalLum = 0;
 
         for (let y = 0; y < h; y++) {
           let sum = 0;
@@ -266,6 +247,7 @@ export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter)
             const lum = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
             lums[y * w + x] = Math.round(lum);
             sum += lum;
+            totalLum += lum;
             if (y === 0) {
               intImg[y * w + x] = sum;
             } else {
@@ -274,10 +256,13 @@ export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter)
           }
         }
 
-        // Ventana local: 1/16 de la anchura de la página
+        const avgLum = totalLum / (w * h);
+        // Si la imagen está sobreexpuesta o con contraste tenue, calibrar el umbral t dinámicamente
         const s = Math.max(8, Math.floor(w / 16));
         const s2 = Math.floor(s / 2);
-        const t = 0.15; // 15% umbral de sensibilidad
+        const t = avgLum > 210 ? 0.08 : 0.12;
+
+        let darkPixelsCount = 0;
 
         for (let y = 0; y < h; y++) {
           const y1 = Math.max(0, y - s2);
@@ -288,7 +273,6 @@ export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter)
             const x2 = Math.min(w - 1, x + s2);
             const count = (x2 - x1 + 1) * (y2 - y1 + 1);
 
-            // Suma del rectángulo desde imagen integral
             const D = intImg[y2 * w + x2];
             const B = y1 > 0 ? intImg[(y1 - 1) * w + x2] : 0;
             const C = x1 > 0 ? intImg[y2 * w + (x1 - 1)] : 0;
@@ -298,11 +282,11 @@ export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter)
             const currentLum = lums[y * w + x];
             const pIdx = (y * w + x) * 4;
 
-            // Si es más oscuro que el promedio local * (1 - t), es tinta (0 = negro), sino papel (255 = blanco)
             if (currentLum * count <= sum * (1 - t)) {
               data[pIdx] = 20;
               data[pIdx + 1] = 20;
               data[pIdx + 2] = 20;
+              darkPixelsCount++;
             } else {
               data[pIdx] = 255;
               data[pIdx + 1] = 255;
@@ -310,10 +294,21 @@ export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter)
             }
           }
         }
+
+        // Salvaguarda: Si el documento resultó en < 0.2% de píxeles oscuros (mancha blanca),
+        // revertir a escala de grises contrastada para preservar todo el texto legible
+        if (darkPixelsCount < (w * h) * 0.002) {
+          for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+            const lum = lums[p];
+            data[i] = lum;
+            data[i + 1] = lum;
+            data[i + 2] = lum;
+          }
+        }
       }
 
       ctx.putImageData(imgData, 0, 0);
-      resolve(canvas.toDataURL('image/jpeg', 0.9));
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
     };
     img.src = imageDataUrl;
   });
@@ -321,84 +316,137 @@ export async function applyImageFilter(imageDataUrl: string, filter: ScanFilter)
 
 /**
  * Detector de documento en tiempo real y evaluador de estabilidad temporal
+ * Sensibilidad ajustada, suavizado exponencial (EMA) y tiempo de estabilidad continua de 1.8 segundos.
  */
 export class DocumentDetector {
-  private prevQuad: Quad | null = null;
+  private smoothedQuad: Quad | null = null;
   private stableSince: number = 0;
-  private readonly STABILITY_DURATION_MS = 800; // 800 ms de estabilidad requerida para auto-disparo
-  private readonly STABILITY_THRESHOLD = 0.035; // Umbral de movimiento de vértices (3.5%)
+  private consecutiveMoveFrames: number = 0;
+
+  // Condición de estabilidad temporal: al menos 1.8 segundos continuos (entre 1.5 y 2.0s)
+  private readonly STABILITY_DURATION_MS = 1800;
+  // Umbral estricto para evitar parpadeos erráticos o falsos positivos en bucle
+  private readonly STABILITY_THRESHOLD = 0.022;
 
   public reset(): void {
-    this.prevQuad = null;
+    this.smoothedQuad = null;
     this.stableSince = 0;
+    this.consecutiveMoveFrames = 0;
   }
 
   /**
-   * Procesa un cuadro de video en canvas reducido y detecta el cuadrilátero del documento
+   * Analiza un fotograma de video verificando estabilidad continua, enfoque e iluminación
    */
   public analyzeFrame(videoElement: HTMLVideoElement): {
-    quad: Quad; // Coordenadas normalizadas [0..1]
+    quad: Quad;
     isDocumentDetected: boolean;
     isStable: boolean;
     stabilityProgress: number; // 0..1
+    isProperlyLit: boolean;
+    statusMessage: string;
   } {
     const vw = videoElement.videoWidth;
     const vh = videoElement.videoHeight;
-    if (!vw || !vh) {
+
+    if (!vw || !vh || videoElement.readyState < 2) {
       return {
         quad: this.getDefaultQuad(),
         isDocumentDetected: false,
         isStable: false,
         stabilityProgress: 0,
+        isProperlyLit: false,
+        statusMessage: 'Iniciando cámara...',
       };
     }
 
-    // Cuadrilátero guiado inteligente por defecto (aprox. 80% centrado con proporción A4)
-    const detectedQuad = this.detectContourQuad(videoElement);
+    // 1. Detección de bordes y estimación del marco
+    const rawDetectedQuad = this.detectContourQuad(videoElement);
 
-    // Evaluar estabilidad temporal
-    const now = Date.now();
-    let isStable = false;
-    let progress = 0;
-
-    if (this.prevQuad) {
-      const maxDisplacement = Math.max(
-        pointDistance(detectedQuad[0], this.prevQuad[0]),
-        pointDistance(detectedQuad[1], this.prevQuad[1]),
-        pointDistance(detectedQuad[2], this.prevQuad[2]),
-        pointDistance(detectedQuad[3], this.prevQuad[3])
-      );
-
-      if (maxDisplacement < this.STABILITY_THRESHOLD) {
-        if (!this.stableSince) {
-          this.stableSince = now;
-        }
-        const elapsed = now - this.stableSince;
-        progress = Math.min(1.0, elapsed / this.STABILITY_DURATION_MS);
-        if (elapsed >= this.STABILITY_DURATION_MS) {
-          isStable = true;
-        }
-      } else {
-        // Demasiado movimiento, reiniciar acumulador de estabilidad
-        this.stableSince = now;
-        progress = 0;
-      }
+    // 2. Filtro de paso bajo / Suavizado Exponencial (EMA) para eliminar temblores
+    if (!this.smoothedQuad) {
+      this.smoothedQuad = rawDetectedQuad;
     } else {
-      this.stableSince = now;
+      const alpha = 0.2; // 20% nuevo, 80% anterior: movimiento fluido y sin saltos bruscos
+      this.smoothedQuad = [
+        {
+          x: this.smoothedQuad[0].x * (1 - alpha) + rawDetectedQuad[0].x * alpha,
+          y: this.smoothedQuad[0].y * (1 - alpha) + rawDetectedQuad[0].y * alpha,
+        },
+        {
+          x: this.smoothedQuad[1].x * (1 - alpha) + rawDetectedQuad[1].x * alpha,
+          y: this.smoothedQuad[1].y * (1 - alpha) + rawDetectedQuad[1].y * alpha,
+        },
+        {
+          x: this.smoothedQuad[2].x * (1 - alpha) + rawDetectedQuad[2].x * alpha,
+          y: this.smoothedQuad[2].y * (1 - alpha) + rawDetectedQuad[2].y * alpha,
+        },
+        {
+          x: this.smoothedQuad[3].x * (1 - alpha) + rawDetectedQuad[3].x * alpha,
+          y: this.smoothedQuad[3].y * (1 - alpha) + rawDetectedQuad[3].y * alpha,
+        },
+      ];
     }
 
-    this.prevQuad = detectedQuad;
+    // 3. Verificación de iluminación y contraste para evitar capturas sobreexpuestas
+    const lightCheck = this.checkLightingAndContrast(videoElement);
+    const now = Date.now();
+
+    // 4. Medir desplazamiento máximo de vértices entre fotogramas
+    const maxDisplacement = Math.max(
+      pointDistance(rawDetectedQuad[0], this.smoothedQuad[0]),
+      pointDistance(rawDetectedQuad[1], this.smoothedQuad[1]),
+      pointDistance(rawDetectedQuad[2], this.smoothedQuad[2]),
+      pointDistance(rawDetectedQuad[3], this.smoothedQuad[3])
+    );
+
+    let isStable = false;
+    let progress = 0;
+    let statusMsg = 'Alinea el documento en el marco';
+
+    if (!lightCheck.isProperlyLit) {
+      // Iluminación deficiente o sobreexpuesta
+      this.stableSince = 0;
+      this.consecutiveMoveFrames = 0;
+      statusMsg = lightCheck.warning;
+    } else if (maxDisplacement < this.STABILITY_THRESHOLD) {
+      this.consecutiveMoveFrames = 0;
+      if (!this.stableSince) {
+        this.stableSince = now;
+      }
+      const elapsed = now - this.stableSince;
+      progress = Math.min(1.0, elapsed / this.STABILITY_DURATION_MS);
+
+      if (elapsed >= this.STABILITY_DURATION_MS) {
+        isStable = true;
+        statusMsg = '✓ Documento Estable — Presiona Obturador';
+      } else {
+        const percent = Math.round(progress * 100);
+        statusMsg = `Mantén quieto el dispositivo (${percent}%)`;
+      }
+    } else {
+      // Si el movimiento persiste por más de 3 fotogramas consecutivos, reiniciar tiempo
+      this.consecutiveMoveFrames++;
+      if (this.consecutiveMoveFrames >= 3) {
+        this.stableSince = 0;
+        progress = 0;
+      } else if (this.stableSince) {
+        const elapsed = now - this.stableSince;
+        progress = Math.min(1.0, elapsed / this.STABILITY_DURATION_MS);
+      }
+      statusMsg = 'Alinea el documento y mantén el pulso';
+    }
 
     return {
-      quad: detectedQuad,
+      quad: this.smoothedQuad,
       isDocumentDetected: true,
       isStable,
       stabilityProgress: progress,
+      isProperlyLit: lightCheck.isProperlyLit,
+      statusMessage: statusMsg,
     };
   }
 
   private getDefaultQuad(): Quad {
-    // 12% margen respecto al marco para facilitar alineación ergonómica
     return [
       { x: 0.12, y: 0.14 },
       { x: 0.88, y: 0.14 },
@@ -408,7 +456,50 @@ export class DocumentDetector {
   }
 
   /**
-   * Detección de contornos con Sobel y gradientes de brillo en canvas miniatura
+   * Evalúa si el frame no está sobreexpuesto ni completamente a oscuras
+   */
+  private checkLightingAndContrast(video: HTMLVideoElement): { isProperlyLit: boolean; warning: string } {
+    try {
+      const sw = 64;
+      const sh = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return { isProperlyLit: true, warning: '' };
+
+      ctx.drawImage(video, 0, 0, sw, sh);
+      const imgData = ctx.getImageData(0, 0, sw, sh);
+      const data = imgData.data;
+
+      let totalLum = 0;
+      let minLum = 255;
+      let maxLum = 0;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        totalLum += lum;
+        if (lum < minLum) minLum = lum;
+        if (lum > maxLum) maxLum = lum;
+      }
+
+      const avgLum = totalLum / (sw * sh);
+      const contrast = maxLum - minLum;
+
+      if (avgLum < 25) {
+        return { isProperlyLit: false, warning: 'Iluminación muy baja — Enciende linterna' };
+      }
+      if (avgLum > 248 && contrast < 20) {
+        return { isProperlyLit: false, warning: 'Sobreexpuesto — Reduce reflejos' };
+      }
+      return { isProperlyLit: true, warning: '' };
+    } catch (e) {
+      return { isProperlyLit: true, warning: '' };
+    }
+  }
+
+  /**
+   * Detección de contornos con gradientes en cuadrícula de muestreo
    */
   private detectContourQuad(video: HTMLVideoElement): Quad {
     try {
@@ -424,13 +515,11 @@ export class DocumentDetector {
       const imgData = ctx.getImageData(0, 0, sw, sh);
       const data = imgData.data;
 
-      // Buscar gradientes de contraste en cuadrículas de muestreo
       let minX = sw * 0.12;
       let maxX = sw * 0.88;
       let minY = sh * 0.14;
       let maxY = sh * 0.86;
 
-      // Buscar bordes fuertes con operador simple horizontal y vertical
       let topY = -1;
       let bottomY = -1;
       let leftX = -1;
@@ -439,43 +528,43 @@ export class DocumentDetector {
       const centerX = Math.floor(sw / 2);
       const centerY = Math.floor(sh / 2);
 
-      // Búsqueda vertical desde el centro hacia afuera
-      for (let y = Math.floor(sh * 0.08); y < centerY; y++) {
+      // Búsqueda vertical
+      for (let y = Math.floor(sh * 0.1); y < centerY; y++) {
         const idx1 = (y * sw + centerX) * 4;
         const idx2 = ((y + 2) * sw + centerX) * 4;
         const diff = Math.abs(data[idx1] - data[idx2]) + Math.abs(data[idx1 + 1] - data[idx2 + 1]);
-        if (diff > 45) {
+        if (diff > 55) {
           topY = y;
           break;
         }
       }
 
-      for (let y = Math.floor(sh * 0.92); y > centerY; y--) {
+      for (let y = Math.floor(sh * 0.9); y > centerY; y--) {
         const idx1 = (y * sw + centerX) * 4;
         const idx2 = ((y - 2) * sw + centerX) * 4;
         const diff = Math.abs(data[idx1] - data[idx2]) + Math.abs(data[idx1 + 1] - data[idx2 + 1]);
-        if (diff > 45) {
+        if (diff > 55) {
           bottomY = y;
           break;
         }
       }
 
-      // Búsqueda horizontal desde el centro hacia afuera
-      for (let x = Math.floor(sw * 0.08); x < centerX; x++) {
+      // Búsqueda horizontal
+      for (let x = Math.floor(sw * 0.1); x < centerX; x++) {
         const idx1 = (centerY * sw + x) * 4;
         const idx2 = (centerY * sw + x + 2) * 4;
         const diff = Math.abs(data[idx1] - data[idx2]) + Math.abs(data[idx1 + 1] - data[idx2 + 1]);
-        if (diff > 45) {
+        if (diff > 55) {
           leftX = x;
           break;
         }
       }
 
-      for (let x = Math.floor(sw * 0.92); x > centerX; x--) {
+      for (let x = Math.floor(sw * 0.9); x > centerX; x--) {
         const idx1 = (centerY * sw + x) * 4;
         const idx2 = (centerY * sw + x - 2) * 4;
         const diff = Math.abs(data[idx1] - data[idx2]) + Math.abs(data[idx1 + 1] - data[idx2 + 1]);
-        if (diff > 45) {
+        if (diff > 55) {
           rightX = x;
           break;
         }
@@ -490,7 +579,6 @@ export class DocumentDetector {
         maxX = rightX;
       }
 
-      // Normalizar entre 0 y 1
       return [
         { x: minX / sw, y: minY / sh },
         { x: maxX / sw, y: minY / sh },
