@@ -137,7 +137,7 @@ export function getMsUntilMidnight(): number {
 }
 
 /**
- * Formatea el tiempo restante en formato HH:MM:SS
+ * Formatea el tiempo restante en formato HHh MMm SSs
  */
 export function formatCountdown(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -149,5 +149,6 @@ export function formatCountdown(ms: number): string {
   const mStr = String(minutes).padStart(2, '0');
   const sStr = String(seconds).padStart(2, '0');
 
-  return `${hStr}:${mStr}:${sStr}`;
+  return `${hStr}h ${mStr}m ${sStr}s`;
 }
+

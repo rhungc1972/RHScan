@@ -46,7 +46,7 @@ export async function generatePdfBlob(pages: ScannedPage[]): Promise<{ blob: Blo
   }
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const fileName = `PocketScan_Zero_${timestamp}.pdf`;
+  const fileName = `RHDocScan_Documento_${timestamp}.pdf`;
   const blob = pdf.output('blob');
 
   return { blob, fileName };
@@ -60,14 +60,14 @@ export async function shareOrDownloadPdf(pages: ScannedPage[]): Promise<ShareRes
   const { blob, fileName } = await generatePdfBlob(pages);
 
   // Crear objeto File estándar
-  const pdfFile = new File([blob], fileName, { type: 'application/pdf' });
+  const pdfFile = new File([blob], 'RHDocScan_Documento.pdf', { type: 'application/pdf' });
 
   // 1. Probar Web Share API Nivel 2 (Nativo de iOS y Android)
   if (typeof navigator !== 'undefined' && 'canShare' in navigator && 'share' in navigator) {
     try {
       const shareData = {
-        title: 'Documento Escaneado - PocketScan Zero',
-        text: 'Documento escaneado de forma 100% privada y procesado localmente con PocketScan Zero.',
+        title: 'RHDocScan_Documento.pdf',
+        text: 'Documento escaneado de forma 100% privada y procesado localmente con RHDocScan.',
         files: [pdfFile],
       };
 

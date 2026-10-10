@@ -205,7 +205,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <span>Arquitectura Zero-Knowledge</span>
           </div>
           <p className="text-[11px] text-slate-300 leading-relaxed">
-            PocketScan Zero no almacena ni transmite tus fotos, cuadrantes ni documentos PDF a ningún servidor. Todo el procesamiento de Computer Vision se ejecuta en la memoria RAM y Canvas del navegador.
+            RHDocScan no almacena ni transmite tus fotos, cuadrantes ni documentos PDF a ningún servidor. Todo el procesamiento de Computer Vision se ejecuta en la memoria RAM y Canvas del navegador.
           </p>
         </div>
       </div>

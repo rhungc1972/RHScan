@@ -79,6 +79,98 @@ export function pointDistance(p1: Point, p2: Point): number {
 }
 
 /**
+ * Conversión matemática precisa entre el sistema de coordenadas visuales en pantalla
+ * (CSS pixels del viewport con object-fit: cover) y el sensor nativo de la cámara (videoWidth / videoHeight).
+ */
+export function screenToSensorPoint(
+  screenPt: Point,
+  viewportW: number,
+  viewportH: number,
+  sensorW: number,
+  sensorH: number
+): Point {
+  if (!sensorW || !sensorH || !viewportW || !viewportH) return screenPt;
+  const scale = Math.max(viewportW / sensorW, viewportH / sensorH);
+  const renderedW = sensorW * scale;
+  const renderedH = sensorH * scale;
+  const offsetX = (viewportW - renderedW) / 2;
+  const offsetY = (viewportH - renderedH) / 2;
+
+  const sensorX = (screenPt.x - offsetX) / scale;
+  const sensorY = (screenPt.y - offsetY) / scale;
+
+  return {
+    x: Math.max(0, Math.min(sensorW, sensorX)),
+    y: Math.max(0, Math.min(sensorH, sensorY)),
+  };
+}
+
+export function sensorToScreenPoint(
+  sensorPt: Point,
+  viewportW: number,
+  viewportH: number,
+  sensorW: number,
+  sensorH: number
+): Point {
+  if (!sensorW || !sensorH || !viewportW || !viewportH) return sensorPt;
+  const scale = Math.max(viewportW / sensorW, viewportH / sensorH);
+  const renderedW = sensorW * scale;
+  const renderedH = sensorH * scale;
+  const offsetX = (viewportW - renderedW) / 2;
+  const offsetY = (viewportH - renderedH) / 2;
+
+  const screenX = sensorPt.x * scale + offsetX;
+  const screenY = sensorPt.y * scale + offsetY;
+
+  return { x: screenX, y: screenY };
+}
+
+/**
+ * Calcula el marco de encuadre Folio / Oficio (proporción 1:1.45) centrado en pantalla,
+ * y lo proyecta tanto en coordenadas de pantalla como en coordenadas normalizadas del sensor [0..1].
+ */
+export function calculateFolioQuad(
+  viewportW: number,
+  viewportH: number,
+  sensorW: number,
+  sensorH: number
+): { screenQuad: Quad; sensorQuad: Quad } {
+  // Proporción Folio/Oficio estándar: 1 : 1.45
+  const folioAspect = 1.45;
+  const marginRatio = 0.84;
+
+  let frameW = viewportW * marginRatio;
+  let frameH = frameW * folioAspect;
+
+  const maxAvailableH = viewportH * 0.74;
+  if (frameH > maxAvailableH) {
+    frameH = maxAvailableH;
+    frameW = frameH / folioAspect;
+  }
+
+  const startX = (viewportW - frameW) / 2;
+  const startY = (viewportH - frameH) / 2 - 12;
+
+  const screenQuad: Quad = [
+    { x: startX, y: startY },
+    { x: startX + frameW, y: startY },
+    { x: startX + frameW, y: startY + frameH },
+    { x: startX, y: startY + frameH },
+  ];
+
+  const sensorQuad: Quad = screenQuad.map((pt) => {
+    const sPt = screenToSensorPoint(pt, viewportW, viewportH, sensorW, sensorH);
+    return {
+      x: sPt.x / (sensorW || 1),
+      y: sPt.y / (sensorH || 1),
+    };
+  }) as Quad;
+
+  return { screenQuad, sensorQuad };
+}
+
+
+/**
  * Corrige y endereza la perspectiva (Warp Perspective) de una imagen fuente
  * Resuelve el bug de pantalla blanca garantizando dimensiones reales (naturalWidth/naturalHeight)
  * y limitando las coordenadas de muestreo para evitar áreas vacías o corruptas.

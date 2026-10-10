@@ -109,6 +109,12 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
     updateLoupe(index);
   };
 
+  const handleTouchStart = (index: number, e: React.TouchEvent) => {
+    setActiveHandleIndex(index);
+    triggerHaptic(25);
+    updateLoupe(index);
+  };
+
   const handlePointerMove = (e: React.PointerEvent) => {
     if (activeHandleIndex === null || !containerRef.current) return;
     e.preventDefault();
@@ -126,6 +132,26 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
     setCorners(updated);
 
     // Actualizar lupa de aumento
+    setLoupePoint({ x: touchX, y: touchY });
+    renderLoupe(normX, normY);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (activeHandleIndex === null || !containerRef.current) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const touchX = touch.clientX - rect.left;
+    const touchY = touch.clientY - rect.top;
+
+    const normX = Math.max(0, Math.min(1, (touchX - imageBounds.x) / imageBounds.width));
+    const normY = Math.max(0, Math.min(1, (touchY - imageBounds.y) / imageBounds.height));
+
+    const updated = [...corners] as Quad;
+    updated[activeHandleIndex] = { x: normX, y: normY };
+    setCorners(updated);
+
     setLoupePoint({ x: touchX, y: touchY });
     renderLoupe(normX, normY);
   };
@@ -280,8 +306,8 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
         </button>
 
         <div className="text-center">
-          <h2 className="text-sm font-bold text-white tracking-wide">Ajustar Perspectiva</h2>
-          <p className="text-[11px] text-slate-400">Arrastra las 4 esquinas del documento</p>
+          <h2 className="text-sm font-bold text-white tracking-wide">Ajuste Fino de Perspectiva</h2>
+          <p className="text-[11px] text-slate-400">Marco Folio / Oficio con lupa táctil</p>
         </div>
 
         <button
@@ -299,7 +325,10 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        className="relative flex-1 w-full h-full overflow-hidden bg-black flex items-center justify-center"
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handlePointerUp}
+        onTouchCancel={handlePointerUp}
+        className="relative flex-1 w-full h-full overflow-hidden bg-black flex items-center justify-center touch-none"
       >
         {/* Imagen congelada capturada */}
         <img
@@ -392,6 +421,7 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
               <div
                 key={idx}
                 onPointerDown={(e) => handlePointerDown(idx, e)}
+                onTouchStart={(e) => handleTouchStart(idx, e)}
                 style={{
                   transform: `translate3d(${posX - 24}px, ${posY - 24}px, 0)`,
                 }}

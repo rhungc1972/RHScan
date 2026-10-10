@@ -16,7 +16,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { ScannedPage } from '../types';
-import { shareOrDownloadPdf } from '../utils/pdfGenerator';
+import { shareOrDownloadPdf, generatePdfBlob, downloadBlobDirectly } from '../utils/pdfGenerator';
 import { triggerHaptic } from '../utils/audioFeedback';
 
 interface DocumentReviewModalProps {
@@ -187,11 +187,11 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
       )}
 
       {/* BARRA INFERIOR DE ACCIÓN: COMPARTIR Y DESCARGAR */}
-      <div className="pb-safe px-safe pt-2 bg-[#0a0f18] border-t border-white/10 flex items-center gap-3 z-20">
+      <div className="pb-safe px-safe pt-2 bg-[#0a0f18] border-t border-white/10 flex flex-col gap-2 z-20">
         <button
           onClick={handleShare}
           disabled={isGenerating || pages.length === 0}
-          className="flex-1 py-3.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm tracking-wide transition flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/30 active:scale-98"
+          className="w-full py-3.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm tracking-wide transition flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/30 active:scale-98"
         >
           {isGenerating ? (
             <>
@@ -204,6 +204,26 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
               <span>Enviar / Compartir PDF ({pages.length})</span>
             </>
           )}
+        </button>
+
+        <button
+          onClick={async () => {
+            if (pages.length === 0 || isGenerating) return;
+            setIsGenerating(true);
+            try {
+              const { blob } = await generatePdfBlob(pages);
+              downloadBlobDirectly(blob, 'RHDocScan_Documento.pdf');
+              setShareSuccessMessage('¡PDF descargado en el almacenamiento local!');
+              onCompleteScan();
+            } finally {
+              setIsGenerating(false);
+            }
+          }}
+          disabled={isGenerating || pages.length === 0}
+          className="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 font-medium text-xs transition border border-white/10 flex items-center justify-center gap-2 active:scale-98"
+        >
+          <Download className="w-4 h-4 text-emerald-400" />
+          <span>Descargar PDF en el teléfono</span>
         </button>
       </div>
     </div>

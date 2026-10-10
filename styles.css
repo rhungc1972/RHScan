@@ -1,0 +1,109 @@
+/* styles.css - RHDocScan Modern Dark UI & Mobile Ergonomics */
+
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --brand-primary: #10b981;
+  --brand-cyan: #38bdf8;
+  --bg-dark: #0a0f18;
+  --panel-bg: rgba(15, 23, 42, 0.85);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--bg-dark);
+  color: #f8fafc;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* Clases ergonómicas para áreas seguras móviles */
+.pt-safe {
+  padding-top: max(12px, env(safe-area-inset-top, 12px));
+}
+
+.pb-safe {
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 16px));
+}
+
+.px-safe {
+  padding-left: max(16px, env(safe-area-inset-left, 16px));
+  padding-right: max(16px, env(safe-area-inset-right, 16px));
+}
+
+/* Glassmorphism sutil y fondos */
+.glass-panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel-heavy {
+  background: rgba(10, 15, 24, 0.94);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+/* Tipografía de números técnicos */
+.font-mono-numbers {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Animación de escaneo láser */
+@keyframes laser-sweep {
+  0% {
+    top: 10%;
+    opacity: 0.2;
+  }
+  50% {
+    top: 90%;
+    opacity: 0.8;
+  }
+  100% {
+    top: 10%;
+    opacity: 0.2;
+  }
+}
+
+.animate-laser {
+  animation: laser-sweep 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Marco Folio / Oficio translúcido */
+.folio-cutout {
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+}
+
+.folio-cutout.stable {
+  border: 2.5px solid #10b981;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45), 0 0 25px rgba(16, 185, 129, 0.35);
+}
+
+/* Botón obturador táctil grande */
+.shutter-btn {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+
+.shutter-btn:active {
+  transform: scale(0.92);
+}

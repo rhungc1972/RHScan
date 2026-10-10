@@ -1,4 +1,4 @@
-# PocketScan Zero - Netlify Configuration
+# RHDocScan - Netlify Configuration
 # Zero-Knowledge 100% Client-Side Mobile Document Scanner
 
 [build]
@@ -10,6 +10,11 @@
   NODE_VERSION = "20"
 
 # Redirecciones para Single Page Application (SPA) y API Functions
+[[redirects]]
+  from = "/api/verify-email"
+  to = "/.netlify/functions/verify-email"
+  status = 200
+
 [[redirects]]
   from = "/api/send-otp"
   to = "/.netlify/functions/send-otp"

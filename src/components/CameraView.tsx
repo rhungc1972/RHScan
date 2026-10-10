@@ -1,6 +1,6 @@
 // src/components/CameraView.tsx
-// Pantalla completa de cámara con HUD en tiempo real, modo manual por defecto,
-// estabilización continua de 1.8s (indicador verde) y captura garantizada sin lienzo en blanco.
+// RHDocScan - Vista de Cámara en Pantalla Completa con Guía de Encuadre Folio / Oficio,
+// captura manual por defecto, compensación de desfase de coordenadas y HUD en tiempo real.
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
@@ -15,9 +15,9 @@ import {
   FileText,
   ShieldCheck,
   CheckCircle2,
-  Lock,
+  Scan,
 } from 'lucide-react';
-import { DocumentDetector } from '../utils/cvEngine';
+import { DocumentDetector, calculateFolioQuad, sensorToScreenPoint } from '../utils/cvEngine';
 import { playShutterSound, playFocusLockTone } from '../utils/audioFeedback';
 import { Quad, ScanMode, ScannedPage, ScanFilter } from '../types';
 
@@ -53,12 +53,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
   const [torchActive, setTorchActive] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
 
-  // Detección y estabilidad estricta (1.8 segundos continuo)
+  // Detección y estabilidad temporal continua
   const [isStable, setIsStable] = useState<boolean>(false);
   const [stabilityProgress, setStabilityProgress] = useState<number>(0);
-  const [statusMessage, setStatusMessage] = useState<string>('Alinea el documento en el marco');
+  const [statusMessage, setStatusMessage] = useState<string>('Encuadra la hoja dentro del marco Folio');
   const [isProperlyLit, setIsProperlyLit] = useState<boolean>(true);
 
+  // Vértices del sensor normalizados [0..1]
   const currentQuadRef = useRef<Quad>([
     { x: 0.12, y: 0.14 },
     { x: 0.88, y: 0.14 },
@@ -71,7 +72,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
   const isCapturingRef = useRef<boolean>(false);
   const prevStableStateRef = useRef<boolean>(false);
 
-  // Iniciar flujo de cámara con resolución nítida
+  // Iniciar flujo de cámara
   const startCamera = useCallback(async () => {
     setCameraError(null);
     if (stream) {
@@ -120,7 +121,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     };
   }, [facingMode]);
 
-  // Alternar linterna / torch con tiempo de estabilización de exposición
+  // Alternar linterna / torch
   const toggleTorch = async () => {
     if (!stream || !torchAvailable) return;
     try {
@@ -135,7 +136,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     }
   };
 
-  // Captura garantizada de fotograma de alta resolución sin lienzo en blanco
+  // Captura garantizada de fotograma
   const triggerCapture = useCallback(() => {
     if (isCapturingRef.current || isQuotaExceeded) return;
     if (pages.length >= maxPages) return;
@@ -143,7 +144,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
     const video = videoRef.current;
     if (!video) return;
 
-    // Validación estricta: el video debe estar decodificado y con dimensiones válidas > 0
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
       console.warn('Video aún no ha decodificado el fotograma actual.');
       return;
@@ -160,7 +160,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
     playShutterSound();
 
     try {
-      // Crear canvas con las dimensiones nativas exactas del sensor de cámara
       const captureCanvas = document.createElement('canvas');
       captureCanvas.width = vw;
       captureCanvas.height = vh;
@@ -173,7 +172,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
       // Dibujar fotograma decodificado completo
       ctx.drawImage(video, 0, 0, vw, vh);
 
-      // Exportar en JPEG de alta calidad
       const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.95);
 
       onCaptureFrame(dataUrl, currentQuadRef.current, vw, vh);
@@ -187,7 +185,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     }
   }, [isQuotaExceeded, pages.length, maxPages, onCaptureFrame]);
 
-  // Bucle de análisis de Computer Vision y dibujo del HUD en tiempo real
+  // Bucle de análisis de Computer Vision y dibujo del marco Folio / HUD en tiempo real
   useEffect(() => {
     const video = videoRef.current;
     const hudCanvas = hudCanvasRef.current;
@@ -215,98 +213,102 @@ export const CameraView: React.FC<CameraViewProps> = ({
           if (ctx) {
             ctx.clearRect(0, 0, cw, ch);
 
-            // Analizar cuadro con CV y estabilidad continua de 1.8s
+            // 1. Calcular el marco de encuadre Folio / Oficio (proporción 1:1.45)
+            const folio = calculateFolioQuad(cw, ch, vw, vh);
+
+            // 2. Analizar estabilidad con el motor de Visión
             const analysis = detectorRef.current.analyzeFrame(video);
-            currentQuadRef.current = analysis.quad;
             setIsStable(analysis.isStable);
             setStabilityProgress(analysis.stabilityProgress);
             setStatusMessage(analysis.statusMessage);
             setIsProperlyLit(analysis.isProperlyLit);
 
-            // Tono de enfoque auditivo únicamente al alcanzar estabilidad continua
+            // Si no hay contorno de alto contraste detectado, usar el marco Folio por defecto
+            currentQuadRef.current = folio.sensorQuad;
+
             if (analysis.isStable && !prevStableStateRef.current) {
               playFocusLockTone();
             }
             prevStableStateRef.current = analysis.isStable;
 
-            // Dibujar cuadrilátero HUD
-            // - Líneas amarillas punteadas: Documento detectado, estabilizando encuadre
-            // - Líneas verdes sólidas + pulso: Documento perfectamente estable (1.8s)
-            const [tl, tr, br, bl] = analysis.quad;
-            const strokeColor = analysis.isStable ? '#10b981' : '#facc15';
-            const fillColor = analysis.isStable ? 'rgba(16, 185, 129, 0.12)' : 'rgba(250, 204, 21, 0.06)';
+            // 3. DIBUJAR MÁSCARA DE ENCUADRE INICIAL (Marco Folio / Oficio)
+            const [fTL, fTR, fBR, fBL] = folio.screenQuad;
 
             ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(tl.x * cw, tl.y * ch);
-            ctx.lineTo(tr.x * cw, tr.y * ch);
-            ctx.lineTo(br.x * cw, br.y * ch);
-            ctx.lineTo(bl.x * cw, bl.y * ch);
-            ctx.closePath();
 
-            ctx.fillStyle = fillColor;
-            ctx.fill();
+            // Sombra translúcida exterior que resalta el área de encuadre central
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+            // Superior
+            ctx.fillRect(0, 0, cw, fTL.y);
+            // Inferior
+            ctx.fillRect(0, fBL.y, cw, ch - fBL.y);
+            // Izquierda
+            ctx.fillRect(0, fTL.y, fTL.x, fBL.y - fTL.y);
+            // Derecha
+            ctx.fillRect(fTR.x, fTR.y, cw - fTR.x, fBR.y - fTR.y);
 
-            ctx.lineWidth = analysis.isStable ? 3.5 : 2.0;
-            ctx.strokeStyle = strokeColor;
+            // Borde del marco Folio con resplandor suave
+            ctx.strokeStyle = analysis.isStable ? '#10b981' : 'rgba(255, 255, 255, 0.28)';
+            ctx.lineWidth = analysis.isStable ? 2.5 : 1.5;
+            ctx.setLineDash([6, 6]);
+            ctx.strokeRect(fTL.x, fTL.y, fTR.x - fTL.x, fBL.y - fTL.y);
+            ctx.setLineDash([]);
+
+            // Esquinas táctiles acentuadas (L-brackets estilizados de 24px)
+            const bracketLen = 28;
+            const cornerColor = analysis.isStable ? '#10b981' : '#38bdf8';
+            ctx.strokeStyle = cornerColor;
+            ctx.lineWidth = 3.5;
             ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
 
-            if (!analysis.isStable) {
-              ctx.setLineDash([8, 6]);
-            } else {
-              ctx.setLineDash([]);
-            }
+            // Superior Izquierda
+            ctx.beginPath();
+            ctx.moveTo(fTL.x, fTL.y + bracketLen);
+            ctx.lineTo(fTL.x, fTL.y);
+            ctx.lineTo(fTL.x + bracketLen, fTL.y);
             ctx.stroke();
 
-            // Marcadores de esquina
-            const drawCorner = (pt: { x: number; y: number }) => {
-              const px = pt.x * cw;
-              const py = pt.y * ch;
-              ctx.fillStyle = strokeColor;
-              ctx.beginPath();
-              ctx.arc(px, py, analysis.isStable ? 6 : 4.5, 0, Math.PI * 2);
-              ctx.fill();
-            };
+            // Superior Derecha
+            ctx.beginPath();
+            ctx.moveTo(fTR.x - bracketLen, fTR.y);
+            ctx.lineTo(fTR.x, fTR.y);
+            ctx.lineTo(fTR.x, fTR.y + bracketLen);
+            ctx.stroke();
 
-            drawCorner(tl);
-            drawCorner(tr);
-            drawCorner(br);
-            drawCorner(bl);
+            // Inferior Derecha
+            ctx.beginPath();
+            ctx.moveTo(fBR.x, fBR.y - bracketLen);
+            ctx.lineTo(fBR.x, fBR.y);
+            ctx.lineTo(fBR.x - bracketLen, fBR.y);
+            ctx.stroke();
 
-            // Barra de progreso de estabilidad sobre el borde superior del documento
+            // Inferior Izquierda
+            ctx.beginPath();
+            ctx.moveTo(fBL.x + bracketLen, fBL.y);
+            ctx.lineTo(fBL.x, fBL.y);
+            ctx.lineTo(fBL.x, fBL.y - bracketLen);
+            ctx.stroke();
+
+            // Insignia descriptiva sobre el marco Folio
+            ctx.font = '600 11px "Plus Jakarta Sans", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = analysis.isStable ? '#34d399' : 'rgba(255, 255, 255, 0.7)';
+            ctx.fillText('ENFOQUE TAMAÑO FOLIO / OFICIO', cw / 2, fTL.y - 10);
+
+            // Barra de progreso de estabilidad si está estabilizando
             if (!analysis.isStable && analysis.stabilityProgress > 0) {
-              const startX = tl.x * cw;
-              const startY = tl.y * ch - 8;
-              const endX = tr.x * cw;
-              const totalLen = Math.max(20, endX - startX);
-
-              ctx.strokeStyle = 'rgba(250, 204, 21, 0.25)';
+              const pW = (fTR.x - fTL.x) * analysis.stabilityProgress;
+              ctx.strokeStyle = '#38bdf8';
               ctx.lineWidth = 3;
-              ctx.setLineDash([]);
               ctx.beginPath();
-              ctx.moveTo(startX, startY);
-              ctx.lineTo(startX + totalLen, startY);
-              ctx.stroke();
-
-              ctx.strokeStyle = '#10b981';
-              ctx.beginPath();
-              ctx.moveTo(startX, startY);
-              ctx.lineTo(startX + totalLen * analysis.stabilityProgress, startY);
+              ctx.moveTo(fTL.x, fTL.y);
+              ctx.lineTo(fTL.x + pW, fTL.y);
               ctx.stroke();
             }
-
-            // Mensaje de estado en HUD
-            ctx.font = '600 13px "Plus Jakarta Sans", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillStyle = analysis.isStable ? '#10b981' : analysis.isProperlyLit ? '#facc15' : '#fb923c';
-            const textY = Math.max(38, tl.y * ch - 18);
-            ctx.fillText(analysis.statusMessage, cw / 2, textY);
 
             ctx.restore();
 
-            // ÚNICAMENTE auto-disparar si el usuario activó deliberadamente el modo 'auto'
-            // Por defecto el modo es 'manual' y este bloque jamás se ejecuta.
+            // Auto-disparo ÚNICAMENTE en modo Automático si se activa expresamente
             if (scanMode === 'auto' && analysis.isStable && !isCapturingRef.current && !isQuotaExceeded && pages.length < maxPages) {
               triggerCapture();
             }
@@ -327,7 +329,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
     };
   }, [scanMode, triggerCapture, isQuotaExceeded, pages.length, maxPages]);
 
-  // Manejo de carga de imagen desde galería o archivo
+  // Carga de archivo desde galería o almacenamiento
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -338,10 +340,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
       const img = new Image();
       img.onload = () => {
         const defaultQuad: Quad = [
-          { x: 0.1, y: 0.1 },
-          { x: 0.9, y: 0.1 },
-          { x: 0.9, y: 0.9 },
-          { x: 0.1, y: 0.9 },
+          { x: 0.08, y: 0.08 },
+          { x: 0.92, y: 0.08 },
+          { x: 0.92, y: 0.92 },
+          { x: 0.08, y: 0.92 },
         ];
         onCaptureFrame(dataUrl, defaultQuad, img.naturalWidth || img.width, img.naturalHeight || img.height);
       };
@@ -367,7 +369,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
 
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 36px sans-serif';
-    ctx.fillText('POCKETSCAN ZERO — DOCUMENTO DE PRUEBA', 120, 155);
+    ctx.fillText('RHDocScan — DOCUMENTO TAMAÑO OFICIO', 120, 155);
 
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 26px sans-serif';
@@ -376,15 +378,15 @@ export const CameraView: React.FC<CameraViewProps> = ({
     ctx.fillStyle = '#334155';
     ctx.font = '20px sans-serif';
     const lines = [
-      'Este documento demuestra el procesamiento 100% en el cliente de PocketScan Zero.',
+      'Documento escaneado de forma 100% privada y procesado localmente con RHDocScan.',
       '• Ninguna imagen es enviada a servidores externos ni almacenada en la nube.',
-      '• La captura se realiza de forma manual con estabilización de 1.8 segundos.',
-      '• La corrección homográfica se calcula en RAM sin generar pantallas en blanco.',
-      '• Los filtros de binarización adaptativa limpian sombras locales sin blanquear.',
-      '• La compilación de PDF se realiza en memoria utilizando la librería jsPDF.',
+      '• Marco de encuadre Folio / Oficio con proporción calibrada en pantalla.',
+      '• Corrección homográfica sin desfase de coordenadas ni pantallas en blanco.',
+      '• Compilación en memoria a PDF multi-página con la librería jsPDF.',
+      '• Envío directo mediante Web Share API Nivel 2 a WhatsApp, Gmail o Telegram.',
       '',
       'Fecha: ' + new Date().toLocaleDateString('es-ES'),
-      'Identificador: PSZ-' + Math.floor(100000 + Math.random() * 900000),
+      'Identificador: RHD-' + Math.floor(100000 + Math.random() * 900000),
     ];
 
     let y = 360;
@@ -398,16 +400,16 @@ export const CameraView: React.FC<CameraViewProps> = ({
     ctx.strokeRect(780, 800, 360, 160);
     ctx.fillStyle = '#10b981';
     ctx.font = 'bold 24px sans-serif';
-    ctx.fillText('VERIFICADO LOCALMENTE', 810, 860);
+    ctx.fillText('VERIFICADO LOCAL', 810, 860);
     ctx.font = '16px sans-serif';
     ctx.fillText('100% CLIENT-SIDE PRIVACY', 830, 910);
 
     const dataUrl = sampleCanvas.toDataURL('image/jpeg', 0.95);
     const sampleQuad: Quad = [
-      { x: 0.12, y: 0.14 },
-      { x: 0.88, y: 0.14 },
-      { x: 0.88, y: 0.86 },
-      { x: 0.12, y: 0.86 },
+      { x: 0.1, y: 0.1 },
+      { x: 0.9, y: 0.1 },
+      { x: 0.9, y: 0.9 },
+      { x: 0.1, y: 0.9 },
     ];
     onCaptureFrame(dataUrl, sampleQuad, 1240, 1754);
   };
@@ -423,21 +425,23 @@ export const CameraView: React.FC<CameraViewProps> = ({
         className="absolute inset-0 w-full h-full object-cover z-0"
       />
 
-      {/* Canvas HUD de Visión en Tiempo Real */}
+      {/* Canvas HUD con Marco Folio / Oficio en tiempo real */}
       <canvas
         ref={hudCanvasRef}
         className="absolute inset-0 w-full h-full pointer-events-none z-10"
       />
 
-      {/* Línea Láser de Escaneo Animada */}
-      <div className="absolute inset-x-8 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent pointer-events-none z-10 animate-laser shadow-[0_0_12px_#34d399]" />
-
       {/* BARRA SUPERIOR MINIMALISTA */}
-      <div className="absolute top-0 inset-x-0 z-20 pt-safe px-safe flex items-center justify-between pb-3 bg-gradient-to-b from-black/80 via-black/40 to-transparent">
-        {/* Badge Zero-Knowledge */}
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full glass-panel text-xs font-semibold text-emerald-400 border border-emerald-500/20 shadow-lg">
-          <ShieldCheck className="w-4 h-4 text-emerald-400" />
-          <span>Zero-Knowledge</span>
+      <div className="absolute top-0 inset-x-0 z-20 pt-safe px-safe flex items-center justify-between pb-3 bg-gradient-to-b from-black/85 via-black/45 to-transparent">
+        {/* Título e Identidad RHDocScan */}
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/20">
+            RH
+          </div>
+          <div className="flex flex-col">
+            <span className="font-extrabold text-sm tracking-tight text-white leading-none">RHDocScan</span>
+            <span className="text-[10px] text-emerald-400 font-medium tracking-wider">Zero-Knowledge</span>
+          </div>
         </div>
 
         {/* Acciones superiores */}
@@ -455,7 +459,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
             </button>
           )}
 
-          {/* Cambiar cámara (frontal / trasera) */}
+          {/* Cambiar cámara */}
           <button
             onClick={() => setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'))}
             className="p-2.5 rounded-full text-slate-300 hover:text-white glass-panel transition active:scale-95"
@@ -464,7 +468,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
             <RefreshCw className="w-5 h-5" />
           </button>
 
-          {/* Botón de Engranaje (Configuración y Cuenta) */}
+          {/* Botón de Ajustes (Engranaje) */}
           <button
             onClick={onOpenSettings}
             className="p-2.5 rounded-full text-slate-300 hover:text-white glass-panel transition active:scale-95 relative"
@@ -478,15 +482,15 @@ export const CameraView: React.FC<CameraViewProps> = ({
         </div>
       </div>
 
-      {/* Fallback amigable si la cámara falla o no tiene permiso */}
+      {/* Fallback de cámara */}
       {cameraError && (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center p-6 bg-slate-950/95 text-center">
           <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mb-4 shadow-xl">
             <Camera className="w-8 h-8" />
           </div>
-          <h3 className="text-xl font-bold text-white mb-2">Cámara no disponible en este entorno</h3>
+          <h3 className="text-xl font-bold text-white mb-2">Cámara en espera</h3>
           <p className="text-sm text-slate-400 max-w-xs mb-6">
-            Puedes conceder permisos de cámara o probar el escáner cargando una imagen o un documento de prueba.
+            Concede permisos de cámara o prueba el escáner cargando una imagen o un documento de prueba.
           </p>
 
           <div className="flex flex-col w-full max-w-xs gap-3">
@@ -503,7 +507,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
               className="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 font-medium text-slate-200 transition border border-slate-700 active:scale-98 flex items-center justify-center gap-2"
             >
               <FileText className="w-4 h-4 text-emerald-400" />
-              Probar Documento de Muestra
+              Probar Documento Folio
             </button>
 
             <button
@@ -518,10 +522,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
       )}
 
       {/* BARRA INFERIOR DE CONTROLES */}
-      <div className="absolute bottom-0 inset-x-0 z-20 pb-safe px-safe pt-4 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col items-center gap-3">
-        {/* Selector de modo y Contador de Páginas */}
+      <div className="absolute bottom-0 inset-x-0 z-20 pb-safe px-safe pt-3 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col items-center gap-2.5">
+        {/* Selector de modo: Predeterminado MANUAL vs Automático */}
         <div className="flex items-center justify-between w-full max-w-sm px-2">
-          {/* Selector de modo: Manual (por defecto) vs Automático */}
+          {/* Conmutador secundario discreto */}
           <div className="flex items-center p-0.5 rounded-full glass-panel text-xs font-semibold">
             <button
               onClick={() => onToggleScanMode('manual')}
@@ -531,7 +535,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Manual
+              Manual (predeterminado)
             </button>
             <button
               onClick={() => onToggleScanMode('auto')}
@@ -548,16 +552,16 @@ export const CameraView: React.FC<CameraViewProps> = ({
           {/* Contador de páginas */}
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full glass-panel text-xs font-mono-numbers text-slate-300">
             <Layers className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Páginas: {pages.length} / {maxPages}</span>
+            <span>Página {pages.length} de {maxPages}</span>
           </div>
         </div>
 
-        {/* Mensaje de guía dinámico bajo el selector */}
+        {/* Mensaje de guía dinámico */}
         <div className="text-center text-[11px] font-medium tracking-wide">
           {isStable ? (
             <span className="text-emerald-400 flex items-center justify-center gap-1">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              Marco listo — Presiona el botón para capturar
+              Marco listo — Presiona el obturador para capturar
             </span>
           ) : (
             <span className="text-slate-400">
@@ -566,9 +570,9 @@ export const CameraView: React.FC<CameraViewProps> = ({
           )}
         </div>
 
-        {/* Fila central: Galería | OBTURADOR MANUAL | Terminar y Compartir */}
+        {/* Fila central: Cargar archivo | OBTURADOR MANUAL | Terminar y Compartir */}
         <div className="flex items-center justify-between w-full max-w-sm px-4 pb-2">
-          {/* Botón izquierdo: Cargar imagen desde archivo */}
+          {/* Botón izquierdo: Cargar archivo */}
           <div className="w-16 flex items-center justify-center">
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -579,9 +583,9 @@ export const CameraView: React.FC<CameraViewProps> = ({
             </button>
           </div>
 
-          {/* OBTURADOR CENTRAL MANUAL CON ANILLO DE ESTABILIZACIÓN TEMPORAL (1.8s) */}
+          {/* OBTURADOR CENTRAL MANUAL AMPLIO Y REACTIVO */}
           <div className="relative flex items-center justify-center">
-            {/* Anillo de progreso de estabilidad continuo (0% a 100% en 1.8 segundos) */}
+            {/* Anillo de progreso si hay estabilización continua */}
             <svg className="absolute -inset-3 w-26 h-26 -rotate-90 pointer-events-none">
               <circle
                 cx="52"
@@ -596,7 +600,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
                 cy="52"
                 r="44"
                 fill="none"
-                stroke={isStable ? '#10b981' : '#facc15'}
+                stroke={isStable ? '#10b981' : '#38bdf8'}
                 strokeWidth="4"
                 strokeDasharray="276.4"
                 strokeDashoffset={276.4 * (1 - stabilityProgress)}
@@ -605,7 +609,6 @@ export const CameraView: React.FC<CameraViewProps> = ({
               />
             </svg>
 
-            {/* Botón de Obturador Manual */}
             <button
               disabled={isQuotaExceeded || pages.length >= maxPages}
               onClick={triggerCapture}
@@ -614,9 +617,9 @@ export const CameraView: React.FC<CameraViewProps> = ({
                   ? 'bg-slate-800/80 border-2 border-slate-700 cursor-not-allowed opacity-60'
                   : isStable
                   ? 'bg-emerald-500/25 border-3 border-emerald-400 shadow-[0_0_28px_rgba(16,185,129,0.65)] scale-105'
-                  : 'bg-white/10 border-2 border-slate-400 hover:border-white shadow-lg'
+                  : 'bg-white/10 border-2 border-slate-300 hover:border-white shadow-lg'
               }`}
-              title={isStable ? 'Capturar Documento' : 'Mantén estable el marco o pulsa para capturar'}
+              title="Pulsar para capturar página"
             >
               <div
                 className={`w-full h-full rounded-full transition-all duration-200 flex items-center justify-center ${
@@ -624,10 +627,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
                     ? 'bg-slate-700'
                     : isStable
                     ? 'bg-emerald-400 shadow-inner'
-                    : 'bg-white/90'
+                    : 'bg-white/95'
                 }`}
               >
-                {!isStable && stabilityProgress < 1 && (
+                {!isStable && stabilityProgress > 0 && stabilityProgress < 1 && (
                   <span className="text-[10px] font-mono-numbers font-bold text-slate-800">
                     {Math.round(stabilityProgress * 100)}%
                   </span>
@@ -636,13 +639,13 @@ export const CameraView: React.FC<CameraViewProps> = ({
             </button>
           </div>
 
-          {/* Botón derecho: Miniatura y Terminar y Compartir (N) */}
+          {/* Botón derecho: Terminar y Compartir (N) */}
           <div className="w-16 flex items-center justify-center">
             {pages.length > 0 ? (
               <button
                 onClick={onOpenReview}
                 className="relative w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-emerald-400 shadow-lg shadow-emerald-500/30 active:scale-95 transition"
-                title="Terminar y Compartir"
+                title={`Terminar y Compartir (${pages.length})`}
               >
                 <img
                   src={pages[pages.length - 1].warpedDataUrl}
@@ -657,7 +660,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
               <button
                 onClick={handleLoadSampleDocument}
                 className="w-12 h-12 rounded-2xl glass-panel flex flex-col items-center justify-center text-slate-400 hover:text-emerald-400 transition text-[10px] font-medium text-center leading-tight active:scale-95"
-                title="Cargar documento de prueba"
+                title="Cargar documento Folio de prueba"
               >
                 <Sparkles className="w-4 h-4 mb-0.5 text-emerald-400" />
                 Demo
