@@ -69,3 +69,12 @@ export interface DocumentMetadata {
     mapsUrl: string;
   };
 }
+
+export interface Sha256AuditLogRecord {
+  id: string;
+  timestamp: string;
+  fileName: string;
+  format: ExportFormat;
+  pageCount: number;
+  sha256Hash: string;
+}

@@ -3,7 +3,12 @@
 
 import { jsPDF } from 'jspdf';
 import { ScannedPage, ExportFormat, DocumentMetadata } from '../types';
-import { collectDocumentMetadata, generateAuditPageDataUrl } from './metadataAudit';
+import {
+  collectDocumentMetadata,
+  generateAuditPageDataUrl,
+  calculateDocumentSha256,
+  saveSha256AuditLog,
+} from './metadataAudit';
 
 export interface ExportResult {
   sharedViaNativeSheet: boolean;
@@ -143,6 +148,21 @@ export async function shareOrDownloadDocument(
     format === 'pdf'
       ? await generatePdfBlob(pages, includeMetadata)
       : await generateJpgBlob(pages, includeMetadata);
+
+  // Registrar en la auditoría local forense SHA-256
+  try {
+    const finalHash = metadata?.sha256Hash || (await calculateDocumentSha256(pages));
+    saveSha256AuditLog({
+      id: 'doc_' + Date.now(),
+      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      fileName,
+      format,
+      pageCount: pages.length,
+      sha256Hash: finalHash,
+    });
+  } catch (logErr) {
+    console.warn('Error registrando log de auditoría:', logErr);
+  }
 
   const mimeType = format === 'pdf' ? 'application/pdf' : 'image/jpeg';
   const file = new File([blob], fileName, { type: mimeType });

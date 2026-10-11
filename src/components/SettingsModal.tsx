@@ -15,6 +15,7 @@ import {
   Clock,
   ExternalLink,
   Smartphone,
+  KeyRound,
 } from 'lucide-react';
 import { ScanFilter, ScanTrackerState } from '../types';
 import { getQuotaInfo, ANONYMOUS_DAILY_LIMIT, REGISTERED_DAILY_LIMIT } from '../services/usageTracker';
@@ -26,6 +27,7 @@ interface SettingsModalProps {
   onChangeFilter: (filter: ScanFilter) => void;
   trackerState: ScanTrackerState;
   onOpenRegistration: () => void;
+  onOpenAdmin?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -34,6 +36,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onChangeFilter,
   trackerState,
   onOpenRegistration,
+  onOpenAdmin,
 }) => {
   const quota = getQuotaInfo(trackerState);
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
@@ -208,6 +211,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             RHDocScan no almacena ni transmite tus fotos, cuadrantes ni documentos PDF a ningún servidor. Todo el procesamiento de Computer Vision se ejecuta en la memoria RAM y Canvas del navegador.
           </p>
         </div>
+
+        {/* ACCESO A PANEL DE ADMINISTRACIÓN / AUDITORÍA */}
+        {onOpenAdmin && (
+          <div className="mt-4 pt-3 border-t border-white/10 text-center">
+            <button
+              onClick={() => {
+                onClose();
+                onOpenAdmin();
+              }}
+              className="text-xs text-slate-400 hover:text-purple-400 transition inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-white/5 active:scale-95"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-purple-400" />
+              <span>Panel de Administración & Debug</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

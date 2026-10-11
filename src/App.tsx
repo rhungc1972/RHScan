@@ -11,6 +11,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { RegistrationModal } from './components/RegistrationModal';
 import { QuotaExceededBanner } from './components/QuotaExceededBanner';
 import { FeedbackModal } from './components/FeedbackModal';
+import { AdminPanelModal } from './components/AdminPanelModal';
 import {
   Quad,
   ScanMode,
@@ -50,6 +51,25 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isRegistrationOpen, setIsRegistrationOpen] = useState<boolean>(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState<boolean>(false);
+  const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
+
+  // Atajo secreto de teclado ("xx" o "admin") para abrir el panel de administración
+  useEffect(() => {
+    let keyBuffer = '';
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignorar si el usuario está escribiendo en un input o textarea
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        return;
+      }
+      keyBuffer = (keyBuffer + e.key.toLowerCase()).slice(-6);
+      if (keyBuffer.endsWith('xx') || keyBuffer.endsWith('admin')) {
+        setIsAdminOpen(true);
+        keyBuffer = '';
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Comprobar periódicamente cambio de día a medianoche
   useEffect(() => {
@@ -206,6 +226,10 @@ export default function App() {
           onChangeFilter={setPreferredFilter}
           trackerState={trackerState}
           onOpenRegistration={() => setIsRegistrationOpen(true)}
+          onOpenAdmin={() => {
+            setIsSettingsOpen(false);
+            setIsAdminOpen(true);
+          }}
         />
       )}
 
@@ -220,6 +244,15 @@ export default function App() {
       {/* MODAL DE COMENTARIOS Y SUGERENCIAS */}
       {isFeedbackOpen && (
         <FeedbackModal onClose={() => setIsFeedbackOpen(false)} />
+      )}
+
+      {/* PANEL DE CONTROL DE ADMINISTRACIÓN Y AUDITORÍA FORENSE SHA-256 */}
+      {isAdminOpen && (
+        <AdminPanelModal
+          onClose={() => setIsAdminOpen(false)}
+          trackerState={trackerState}
+          onRefreshTracker={() => setTrackerState(getUsageState())}
+        />
       )}
     </div>
   );
