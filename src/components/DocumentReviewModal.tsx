@@ -155,14 +155,14 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             </div>
           )}
 
-          {/* Botón Prominente: Comentarios y Sugerencias */}
+          {/* Botón Prominente: Observaciones y Sugerencias */}
           <div className="w-full max-w-xs pt-4 space-y-3">
             <button
               onClick={onOpenFeedback}
               className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-slate-950 font-bold text-sm tracking-wide transition shadow-lg shadow-emerald-500/25 active:scale-98 flex items-center justify-center gap-2"
             >
               <MessageSquare className="w-4 h-4" />
-              <span>💬 Comentarios y Sugerencias</span>
+              <span>💬 Observaciones y Sugerencias</span>
             </button>
 
             <button

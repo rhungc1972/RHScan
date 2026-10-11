@@ -122,61 +122,10 @@ export async function collectDocumentMetadata(
   };
 }
 
-/**
- * Dibuja un código QR estilizado en canvas para la verificación del acta
- */
-function drawQrMatrix(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, text: string) {
-  const modules = 25; // 25x25 grid
-  const cellSize = size / modules;
-
-  // Fondo blanco con borde
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(x, y, size, size);
-  ctx.strokeStyle = '#e2e8f0';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x, y, size, size);
-
-  ctx.fillStyle = '#0f172a';
-
-  // Marcadores de posición en 3 esquinas (Finder patterns)
-  const drawFinder = (cx: number, cy: number) => {
-    ctx.fillRect(x + cx * cellSize, y + cy * cellSize, 7 * cellSize, 7 * cellSize);
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + (cx + 1) * cellSize, y + (cy + 1) * cellSize, 5 * cellSize, 5 * cellSize);
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(x + (cx + 2) * cellSize, y + (cy + 2) * cellSize, 3 * cellSize, 3 * cellSize);
-  };
-
-  drawFinder(0, 0);
-  drawFinder(modules - 7, 0);
-  drawFinder(0, modules - 7);
-
-  // Semilla pseudoaleatoria determinista basada en el texto para generar módulos escaneables
-  let seed = 0;
-  for (let i = 0; i < text.length; i++) {
-    seed = (seed * 31 + text.charCodeAt(i)) >>> 0;
-  }
-
-  for (let r = 0; r < modules; r++) {
-    for (let c = 0; c < modules; c++) {
-      // Ignorar finders
-      if (
-        (r < 8 && c < 8) ||
-        (r < 8 && c >= modules - 8) ||
-        (r >= modules - 8 && c < 8)
-      ) {
-        continue;
-      }
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      if ((seed & 1) === 1 || (r % 2 === 0 && c % 3 === 0)) {
-        ctx.fillRect(x + c * cellSize, y + r * cellSize, cellSize - 0.5, cellSize - 0.5);
-      }
-    }
-  }
-}
 
 /**
  * Genera el "Acta de Certificación y Trazabilidad Digital" como imagen A4 de alta resolución
+ * SIN código QR, con tipografía limpia y formal.
  */
 export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
   const canvas = document.createElement('canvas');
@@ -186,7 +135,7 @@ export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
 
-  // Fondo papel pergamino oficial
+  // Fondo blanco nítido
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, 1240, 1754);
 
@@ -204,17 +153,17 @@ export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
   ctx.fillRect(50, 50, 1140, 140);
 
   ctx.fillStyle = '#10b981';
-  ctx.font = 'bold 32px "Plus Jakarta Sans", sans-serif';
-  ctx.fillText('RHDocScan — CERTIFICACIÓN DIGITAL DE DOCUMENTO', 90, 110);
+  ctx.font = 'bold 30px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText('RHDocScan — CERTIFICACIÓN DIGITAL DE DOCUMENTO', 90, 105);
 
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '500 16px sans-serif';
-  ctx.fillText('ACTA OFICIAL DE TRAZABILIDAD, AUDITORÍA Y REGISTRO CRIPTOGRÁFICO', 90, 150);
+  ctx.fillStyle = '#f8fafc';
+  ctx.font = 'bold 20px "Plus Jakarta Sans", sans-serif';
+  ctx.fillText('Acta de Certificación y Trazabilidad Digital', 90, 145);
 
-  // Sello de seguridad "VERIFICADO"
+  // Sello de seguridad "VERIFICADO LOCAL"
   ctx.save();
   ctx.translate(1030, 120);
-  ctx.rotate(-0.1);
+  ctx.rotate(-0.08);
   ctx.strokeStyle = '#34d399';
   ctx.lineWidth = 3;
   ctx.strokeRect(-80, -25, 160, 50);
@@ -225,7 +174,7 @@ export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
   ctx.restore();
 
   // Sección 1: Huella Criptográfica SHA-256
-  let curY = 240;
+  let curY = 245;
 
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 20px sans-serif';
@@ -233,23 +182,22 @@ export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
 
   curY += 28;
   ctx.fillStyle = '#f8fafc';
-  ctx.fillRect(90, curY, 1060, 70);
+  ctx.fillRect(90, curY, 1060, 80);
   ctx.strokeStyle = '#cbd5e1';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(90, curY, 1060, 70);
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(90, curY, 1060, 80);
+
+  ctx.fillStyle = '#059669';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('IDENTIFICADOR CRIPTOGRÁFICO ÚNICO:', 110, curY + 28);
 
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 15px "JetBrains Mono", monospace';
-  ctx.fillText(metadata.sha256Hash, 110, curY + 42);
+  ctx.font = 'bold 16px "JetBrains Mono", monospace';
+  ctx.fillText(`SHA-256: ${metadata.sha256Hash}`, 110, curY + 56);
 
-  curY += 105;
+  curY += 120;
 
-  // Sección 2: Cronología y Marcas de Tiempo
-  ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 20px sans-serif';
-  ctx.fillText('2. CRONOLOGÍA DE CAPTURA Y AUDITORÍA', 90, curY);
-
-  curY += 25;
+  // Función auxiliar de dibujo de filas
   const drawDataRow = (label: string, value: string) => {
     ctx.fillStyle = '#64748b';
     ctx.font = '600 15px sans-serif';
@@ -259,87 +207,103 @@ export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
     ctx.font = '500 15px sans-serif';
     ctx.fillText(value, 360, curY);
 
-    curY += 32;
+    curY += 34;
   };
 
-  drawDataRow('Timestamp Local:', metadata.timestampLocal);
-  drawDataRow('Timestamp UTC:', metadata.timestampUtc);
-  drawDataRow('Páginas Digitalizadas:', `${metadata.pageCount} página(s) procesada(s)`);
-  drawDataRow('Formato de Salida:', (metadata.format || 'pdf').toUpperCase());
-
-  curY += 20;
-
-  // Sección 3: Evidencia de Conectividad y Dispositivo
+  // Sección 2: Cronología y Marcas de Tiempo
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 20px sans-serif';
-  ctx.fillText('3. METADATOS TÉCNICOS DEL DISPOSITIVO', 90, curY);
+  ctx.fillText('2. CRONOLOGÍA DE CAPTURA Y AUDITORÍA', 90, curY);
+
+  curY += 28;
+  drawDataRow('Fecha y Hora (Local):', metadata.timestampLocal);
+  drawDataRow('Fecha y Hora (UTC):', metadata.timestampUtc);
+  drawDataRow('Páginas Digitalizadas:', `${metadata.pageCount} página(s) compilada(s)`);
+  drawDataRow('Formato de Salida:', (metadata.format || 'pdf').toUpperCase());
 
   curY += 25;
-  drawDataRow('IP Pública de Salida:', metadata.publicIp || 'No disponible');
+
+  // Sección 3: Metadatos Técnicos del Dispositivo
+  ctx.fillStyle = '#0f172a';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillText('3. DATOS TÉCNICOS DEL DISPOSITIVO Y CONECTIVIDAD', 90, curY);
+
+  curY += 28;
+  drawDataRow('IP Pública de Salida:', metadata.publicIp || 'No disponible / Red local');
   drawDataRow('Resolución de Pantalla:', metadata.screenResolution);
-  drawDataRow('Entorno / Dispositivo:', metadata.deviceInfo.slice(0, 55));
-  if (metadata.deviceInfo.length > 55) {
+  drawDataRow('Entorno / Dispositivo:', metadata.deviceInfo.slice(0, 60));
+  if (metadata.deviceInfo.length > 60) {
     ctx.fillStyle = '#0f172a';
     ctx.font = '500 14px sans-serif';
-    ctx.fillText(metadata.deviceInfo.slice(55, 115), 360, curY);
+    ctx.fillText(metadata.deviceInfo.slice(60, 130), 360, curY);
     curY += 30;
   }
 
+  curY += 25;
+
   // Sección 4: Ubicación Geográfica
-  curY += 20;
   ctx.fillStyle = '#0f172a';
   ctx.font = 'bold 20px sans-serif';
-  ctx.fillText('4. GEOLOCALIZACIÓN Y REFERENCIA ESPACIAL', 90, curY);
+  ctx.fillText('4. COORDENADAS GPS Y REFERENCIA ESPACIAL', 90, curY);
 
-  curY += 25;
+  curY += 28;
   if (metadata.location) {
-    drawDataRow('Coordenadas GPS:', `Lat: ${metadata.location.latitude}, Lng: ${metadata.location.longitude}`);
+    drawDataRow('Coordenadas GPS:', `Latitud: ${metadata.location.latitude}, Longitud: ${metadata.location.longitude}`);
     drawDataRow('Precisión Estimada:', `± ${metadata.location.accuracy} metros`);
     drawDataRow('Enlace Geográfico:', metadata.location.mapsUrl);
   } else {
-    drawDataRow('Ubicación GPS:', 'No suministrada (permiso de geolocalización denegado en el navegador)');
+    drawDataRow('Ubicación GPS:', 'No suministrada (permiso de geolocalización no otorgado por el usuario)');
   }
 
-  // Sección 5: Código QR de Validación y Declaración Legal
-  curY += 30;
-  ctx.fillStyle = '#f1f5f9';
-  ctx.fillRect(90, curY, 1060, 260);
+  curY += 35;
+
+  // Sección 5: Declaración Legal y Trazabilidad (Diseño tipográfico limpio SIN QR)
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(90, curY, 1060, 290);
   ctx.strokeStyle = '#cbd5e1';
-  ctx.strokeRect(90, curY, 1060, 260);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(90, curY, 1060, 290);
 
-  // Dibujar QR
-  const qrVerificationText = `RHDocScan:SHA256:${metadata.sha256Hash}:TIME:${metadata.timestampUtc}`;
-  drawQrMatrix(ctx, 120, curY + 25, 210, qrVerificationText);
-
-  // Texto legal al lado del QR
   ctx.fillStyle = '#0f172a';
-  ctx.font = 'bold 16px sans-serif';
-  ctx.fillText('DECLARACIÓN DE INTEGRIDAD Y ARQUITECTURA ZERO-KNOWLEDGE', 360, curY + 50);
+  ctx.font = 'bold 18px sans-serif';
+  ctx.fillText('5. DECLARACIÓN DE INTEGRIDAD Y ARQUITECTURA ZERO-KNOWLEDGE', 120, curY + 45);
 
-  ctx.fillStyle = '#475569';
-  ctx.font = '13px sans-serif';
+  ctx.fillStyle = '#334155';
+  ctx.font = '14px sans-serif';
   const legalParagraphs = [
-    'El presente documento ha sido procesado de manera íntegra y exclusiva en la memoria',
-    'RAM del dispositivo móvil del usuario. Los datos expuestos en esta acta reflejan el',
-    'estado exacto de los archivos al momento de su consolidación criptográfica.',
+    '• El presente documento ha sido procesado de manera 100% íntegra y confidencial en la memoria RAM',
+    '  del dispositivo móvil del usuario, sin transmisión de imágenes ni documentos a servidores externos.',
+    '• Los datos expuestos en esta acta reflejan el estado inmutable de los archivos al momento de su consolidación.',
+    '• La huella criptográfica SHA-256 generada permite verificar matemáticamente que el contenido del archivo',
+    '  no ha sufrido alteraciones, sustituciones ni corrupciones posteriores a su emisión.',
     '',
-    'La huella digital SHA-256 permite certificar que el archivo no ha sido alterado desde',
-    'su emisión original. Escanea el código QR para validar la correspondencia del Hash.',
+    'Bloque de Integridad Criptográfica:',
+    `SHA-256: [${metadata.sha256Hash}]`,
     '',
-    'Generado automáticamente por el motor de visión y criptografía RHDocScan v2.4.',
+    'Certificado emitido automáticamente por el motor de visión computacional y criptografía RHDocScan v2.4.',
   ];
 
   let textY = curY + 80;
   legalParagraphs.forEach((line) => {
-    ctx.fillText(line, 360, textY);
-    textY += 20;
+    if (line.startsWith('SHA-256:')) {
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 14px "JetBrains Mono", monospace';
+    } else if (line.startsWith('Bloque')) {
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 13px sans-serif';
+    } else {
+      ctx.fillStyle = '#475569';
+      ctx.font = '14px sans-serif';
+    }
+    ctx.fillText(line, 120, textY);
+    textY += 21;
   });
 
-  // Pie de página
+  // Pie de página oficial
   ctx.fillStyle = '#94a3b8';
   ctx.font = '12px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('RHDocScan — Seguridad, Privacidad Absoluta y Cero Almacenamiento en Servidor', 620, 1675);
+  ctx.fillText('RHDocScan — Seguridad, Privacidad Absoluta y Cero Almacenamiento en Servidor (Client-Side Only)', 620, 1675);
 
   return canvas.toDataURL('image/jpeg', 0.95);
 }

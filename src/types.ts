@@ -78,3 +78,10 @@ export interface Sha256AuditLogRecord {
   pageCount: number;
   sha256Hash: string;
 }
+
+export interface FeedbackRecord {
+  id: string;
+  name: string;
+  message: string;
+  timestamp: string;
+}

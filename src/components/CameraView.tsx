@@ -16,15 +16,17 @@ import {
   ShieldCheck,
   CheckCircle2,
   Scan,
+  Share2,
 } from 'lucide-react';
 import { DocumentDetector, calculateFolioQuad, sensorToScreenPoint } from '../utils/cvEngine';
-import { playShutterSound, playFocusLockTone } from '../utils/audioFeedback';
+import { playShutterSound, playFocusLockTone, triggerHaptic } from '../utils/audioFeedback';
 import { Quad, ScanMode, ScannedPage, ScanFilter, ExportFormat } from '../types';
 
 interface CameraViewProps {
   onCaptureFrame: (imageDataUrl: string, detectedQuad: Quad, width: number, height: number) => void;
   onOpenSettings: () => void;
   onOpenReview: () => void;
+  onShareApp?: () => void;
   pages: ScannedPage[];
   maxPages: number;
   isQuotaExceeded: boolean;
@@ -39,6 +41,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
   onCaptureFrame,
   onOpenSettings,
   onOpenReview,
+  onShareApp,
   pages,
   maxPages,
   isQuotaExceeded,
@@ -498,6 +501,15 @@ export const CameraView: React.FC<CameraViewProps> = ({
             <RefreshCw className="w-5 h-5" />
           </button>
 
+          {/* Botón: Compartir App */}
+          <button
+            onClick={onShareApp}
+            className="p-2.5 rounded-full text-slate-300 hover:text-white glass-panel transition active:scale-95 flex items-center justify-center"
+            title="Compartir App"
+          >
+            <Share2 className="w-5 h-5 text-emerald-400" />
+          </button>
+
           {/* Botón de Ajustes (Engranaje) */}
           <button
             onClick={onOpenSettings}
@@ -551,27 +563,30 @@ export const CameraView: React.FC<CameraViewProps> = ({
         </div>
       )}
 
-      {/* BARRA INFERIOR DE CONTROLES */}
-      <div className="absolute bottom-0 inset-x-0 z-20 pb-safe px-safe pt-3 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col items-center gap-2.5">
-        {/* Selector de modo: Predeterminado MANUAL vs Automático */}
-        <div className="flex items-center justify-between w-full max-w-sm px-2">
+      {/* BARRA INFERIOR DE CONTROLES ELEVADA */}
+      <div
+        style={{ bottom: 'calc(45px + env(safe-area-inset-bottom, 0px))' }}
+        className="absolute inset-x-0 z-20 px-safe flex flex-col items-center gap-1.5 pointer-events-none"
+      >
+        {/* Selector de modo y contador con separación reducida */}
+        <div className="flex items-center justify-between w-full max-w-sm px-4 pointer-events-auto">
           {/* Conmutador secundario discreto */}
-          <div className="flex items-center p-0.5 rounded-full glass-panel text-xs font-semibold">
+          <div className="flex items-center p-0.5 rounded-full glass-panel text-[11px] font-semibold backdrop-blur-md">
             <button
               onClick={() => onToggleScanMode('manual')}
-              className={`px-3 py-1.5 rounded-full transition ${
+              className={`px-2.5 py-1 rounded-full transition ${
                 scanMode === 'manual'
-                  ? 'bg-emerald-500 text-white shadow-sm'
+                  ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Manual (predeterminado)
+              Manual
             </button>
             <button
               onClick={() => onToggleScanMode('auto')}
-              className={`px-3 py-1.5 rounded-full transition ${
+              className={`px-2.5 py-1 rounded-full transition ${
                 scanMode === 'auto'
-                  ? 'bg-emerald-500 text-white shadow-sm'
+                  ? 'bg-emerald-500 text-slate-950 font-bold shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -580,60 +595,60 @@ export const CameraView: React.FC<CameraViewProps> = ({
           </div>
 
           {/* Contador de páginas */}
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full glass-panel text-xs font-mono-numbers text-slate-300">
-            <Layers className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Página {pages.length} de {maxPages}</span>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full glass-panel text-[11px] font-mono-numbers text-slate-300 backdrop-blur-md">
+            <Layers className="w-3 h-3 text-emerald-400" />
+            <span>Página {pages.length} / {maxPages}</span>
           </div>
         </div>
 
-        {/* Mensaje de guía dinámico */}
-        <div className="text-center text-[11px] font-medium tracking-wide">
+        {/* Mensaje de guía dinámico con espaciado mínimo */}
+        <div className="text-center text-[11px] font-medium tracking-wide py-0.5 px-3 rounded-full bg-black/60 backdrop-blur-sm border border-white/5 pointer-events-auto">
           {isStable ? (
-            <span className="text-emerald-400 flex items-center justify-center gap-1">
+            <span className="text-emerald-400 flex items-center justify-center gap-1 font-semibold">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              Marco listo — Presiona el obturador para capturar
+              Alineado — Pulsa el obturador
             </span>
           ) : (
-            <span className="text-slate-400">
+            <span className="text-slate-300">
               {statusMessage}
             </span>
           )}
         </div>
 
-        {/* Fila central: Cargar archivo | OBTURADOR MANUAL | Terminar y Compartir */}
-        <div className="flex items-center justify-between w-full max-w-sm px-4 pb-2">
-          {/* Botón izquierdo: Cargar archivo */}
-          <div className="w-16 flex items-center justify-center">
+        {/* Fila horizontalmente alineada: Cargar archivo | OBTURADOR MANUAL | Botón Secundario / Miniatura */}
+        <div className="flex items-center justify-between w-full max-w-sm px-6 pt-1 pointer-events-auto">
+          {/* Botón izquierdo: Cargar archivo / Galería */}
+          <div className="w-16 h-20 flex items-center justify-center">
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-12 h-12 rounded-2xl glass-panel flex flex-col items-center justify-center text-slate-300 hover:text-white transition active:scale-95"
-              title="Cargar archivo"
+              className="w-12 h-12 rounded-2xl glass-panel flex flex-col items-center justify-center text-slate-300 hover:text-white transition active:scale-95 shadow-lg border border-white/10"
+              title="Cargar foto desde galería"
             >
               <Upload className="w-5 h-5" />
             </button>
           </div>
 
-          {/* OBTURADOR CENTRAL MANUAL AMPLIO Y REACTIVO */}
-          <div className="relative flex items-center justify-center">
+          {/* OBTURADOR CENTRAL MANUAL ELEVADO, 100% VISIBLE Y CENTRADO */}
+          <div className="relative w-20 h-20 flex items-center justify-center flex-shrink-0">
             {/* Anillo de progreso si hay estabilización continua */}
-            <svg className="absolute -inset-3 w-26 h-26 -rotate-90 pointer-events-none">
+            <svg className="absolute -inset-2.5 w-25 h-25 -rotate-90 pointer-events-none">
               <circle
-                cx="52"
-                cy="52"
-                r="44"
+                cx="50"
+                cy="50"
+                r="42"
                 fill="none"
-                stroke="rgba(255, 255, 255, 0.1)"
+                stroke="rgba(255, 255, 255, 0.15)"
                 strokeWidth="4"
               />
               <circle
-                cx="52"
-                cy="52"
-                r="44"
+                cx="50"
+                cy="50"
+                r="42"
                 fill="none"
                 stroke={isStable ? '#10b981' : '#38bdf8'}
                 strokeWidth="4"
-                strokeDasharray="276.4"
-                strokeDashoffset={276.4 * (1 - stabilityProgress)}
+                strokeDasharray="263.8"
+                strokeDashoffset={263.8 * (1 - stabilityProgress)}
                 strokeLinecap="round"
                 className="transition-all duration-100"
               />
@@ -642,12 +657,12 @@ export const CameraView: React.FC<CameraViewProps> = ({
             <button
               disabled={isQuotaExceeded || pages.length >= maxPages}
               onClick={triggerCapture}
-              className={`w-20 h-20 rounded-full flex items-center justify-center p-1.5 transition active:scale-90 ${
+              className={`w-18 h-18 rounded-full flex items-center justify-center p-1.5 transition active:scale-90 ${
                 isQuotaExceeded || pages.length >= maxPages
                   ? 'bg-slate-800/80 border-2 border-slate-700 cursor-not-allowed opacity-60'
                   : isStable
-                  ? 'bg-emerald-500/25 border-3 border-emerald-400 shadow-[0_0_28px_rgba(16,185,129,0.65)] scale-105'
-                  : 'bg-white/10 border-2 border-slate-300 hover:border-white shadow-lg'
+                  ? 'bg-emerald-500/25 border-3 border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.7)] scale-105'
+                  : 'bg-white/10 border-2 border-slate-200 hover:border-white shadow-xl'
               }`}
               title="Pulsar para capturar página"
             >
@@ -657,7 +672,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
                     ? 'bg-slate-700'
                     : isStable
                     ? 'bg-emerald-400 shadow-inner'
-                    : 'bg-white/95'
+                    : 'bg-white shadow-md'
                 }`}
               >
                 {!isStable && stabilityProgress > 0 && stabilityProgress < 1 && (
@@ -669,12 +684,12 @@ export const CameraView: React.FC<CameraViewProps> = ({
             </button>
           </div>
 
-          {/* Botón derecho: Terminar y Compartir (N) */}
-          <div className="w-16 flex items-center justify-center">
+          {/* Botón derecho secundario: Miniatura de Páginas o Botón Demo alineado en altura */}
+          <div className="w-16 h-20 flex items-center justify-center">
             {pages.length > 0 ? (
               <button
                 onClick={onOpenReview}
-                className="relative w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-emerald-400 shadow-lg shadow-emerald-500/30 active:scale-95 transition"
+                className="relative w-12 h-12 rounded-2xl overflow-hidden ring-2 ring-emerald-400 shadow-lg shadow-emerald-500/30 active:scale-95 transition"
                 title={`Terminar y Compartir (${pages.length})`}
               >
                 <img
@@ -689,11 +704,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
             ) : (
               <button
                 onClick={handleLoadSampleDocument}
-                className="w-12 h-12 rounded-2xl glass-panel flex flex-col items-center justify-center text-slate-400 hover:text-emerald-400 transition text-[10px] font-medium text-center leading-tight active:scale-95"
+                className="w-12 h-12 rounded-2xl glass-panel flex flex-col items-center justify-center text-slate-300 hover:text-emerald-400 transition text-[10px] font-semibold active:scale-95 shadow-lg border border-white/10"
                 title="Cargar documento Folio de prueba"
               >
                 <Sparkles className="w-4 h-4 mb-0.5 text-emerald-400" />
-                Demo
+                <span>Demo</span>
               </button>
             )}
           </div>

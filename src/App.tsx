@@ -52,6 +52,41 @@ export default function App() {
   const [isRegistrationOpen, setIsRegistrationOpen] = useState<boolean>(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState<boolean>(false);
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+  }, []);
+
+  const handleShareApp = useCallback(async () => {
+    triggerHaptic(25);
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'RHDocScan - Escáner Móvil Seguro',
+          text: 'Escanea documentos en PDF con calidad profesional, 100% privado y sin servidores.',
+          url: window.location.href,
+        });
+      } catch (err: unknown) {
+        const error = err as Error;
+        if (error.name !== 'AbortError') {
+          // Copia al portapapeles en caso de error
+          if (navigator.clipboard) {
+            await navigator.clipboard.writeText(window.location.href).catch(() => {});
+          }
+          showToast('¡Enlace copiado al portapapeles!');
+        }
+      }
+    } else {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(window.location.href).catch(() => {});
+      }
+      showToast('¡Enlace copiado al portapapeles!');
+    }
+  }, [showToast]);
 
   // Atajo secreto de teclado ("xx" o "admin") para abrir el panel de administración
   useEffect(() => {
@@ -172,6 +207,7 @@ export default function App() {
         onCaptureFrame={handleCaptureFrame}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenReview={() => setIsReviewOpen(true)}
+        onShareApp={handleShareApp}
         pages={pages}
         maxPages={MAX_PAGES_PER_DOCUMENT}
         isQuotaExceeded={isQuotaExceeded}
@@ -181,6 +217,16 @@ export default function App() {
         exportFormat={exportFormat}
         onChangeExportFormat={setExportFormat}
       />
+
+      {/* TOAST DE NOTIFICACIÓN GLOBAL (EJ. ENLACE COPIADO) */}
+      {toastMessage && (
+        <div className="fixed top-16 inset-x-4 z-50 flex items-center justify-center pointer-events-none animate-fadeIn">
+          <div className="bg-slate-900/95 border border-emerald-500/50 text-white px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-md text-xs font-semibold flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>{toastMessage}</span>
+          </div>
+        </div>
+      )}
 
       {/* BANNER EN CASO DE CUPO EXCEDIDO CON CUENTA REGRESIVA */}
       {isQuotaExceeded && (

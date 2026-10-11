@@ -1,7 +1,7 @@
 // src/components/SettingsModal.tsx
-// Panel flotante de ajustes, filtros, estado de cuenta y botón PWA
+// Panel flotante de ajustes, filtros, estado de cuenta y botón Descargar App
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   X,
   Shield,
@@ -16,10 +16,13 @@ import {
   ExternalLink,
   Smartphone,
   KeyRound,
+  Store,
+  CheckCircle2,
 } from 'lucide-react';
 import { ScanFilter, ScanTrackerState } from '../types';
 import { getQuotaInfo, ANONYMOUS_DAILY_LIMIT, REGISTERED_DAILY_LIMIT } from '../services/usageTracker';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { triggerHaptic } from '../utils/audioFeedback';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -40,11 +43,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const quota = getQuotaInfo(trackerState);
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
-  const [showIOSPrompt, setShowIOSPrompt] = React.useState(false);
+  const [showIOSPrompt, setShowIOSPrompt] = useState(false);
+  const [appToast, setAppToast] = useState<string | null>(null);
+
+  const handleDownloadAppClick = async () => {
+    triggerHaptic(25);
+
+    // Si el navegador soporta el prompt PWA nativo (Android Chrome / Edge), dispararlo directamente
+    if (isInstallable) {
+      const installed = await install();
+      if (installed) {
+        setAppToast('¡RHDocScan se ha instalado en tu pantalla de inicio!');
+        setTimeout(() => setAppToast(null), 4000);
+        return;
+      }
+    }
+
+    if (isIOS) {
+      setShowIOSPrompt(true);
+    }
+
+    // Mostrar el toast informativo elegante requerido
+    setAppToast(
+      '📱 RHDocScan estará disponible muy pronto en Google Play Store y Apple App Store. ¡Por ahora puedes usarla directamente desde la web!'
+    );
+    setTimeout(() => {
+      setAppToast(null);
+    }, 6000);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
       <div className="w-full max-w-sm rounded-3xl glass-panel-heavy p-6 shadow-2xl border border-white/10 relative max-h-[90vh] overflow-y-auto">
+        {/* Toast Notificación flotante dentro del modal */}
+        {appToast && (
+          <div className="absolute top-4 inset-x-4 z-30 p-3.5 rounded-2xl bg-slate-900/95 border border-emerald-500/40 text-emerald-300 text-xs shadow-2xl backdrop-blur-md animate-scaleUp flex items-start gap-2.5">
+            <Info className="w-5 h-5 flex-shrink-0 text-emerald-400 mt-0.5" />
+            <div className="flex-1 text-[11px] leading-relaxed text-slate-200">
+              {appToast}
+            </div>
+            <button
+              onClick={() => setAppToast(null)}
+              className="text-slate-400 hover:text-white p-1"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Encabezado */}
         <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-4">
           <div className="flex items-center gap-2">
@@ -61,39 +107,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        {/* ESTADO DE CUENTA Y CUPO */}
-        <div className="p-4 rounded-2xl bg-slate-900/90 border border-white/10 mb-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs text-slate-400 font-medium">Estado de Cuenta</span>
-            {trackerState.isRegistered ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/30">
-                <UserCheck className="w-3 h-3" />
-                Registrado (10/día)
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
-                Anónimo (3/día)
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-baseline justify-between mb-1.5">
-            <span className="text-2xl font-bold font-mono-numbers text-white">
-              {quota.remaining} <span className="text-xs text-slate-400 font-normal">disponibles hoy</span>
-            </span>
-            <span className="text-xs text-slate-400 font-mono-numbers">
-              {quota.used} / {quota.max} usados
-            </span>
-          </div>
-
-          {/* Barra de progreso de cupo */}
-          <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden mb-3">
-            <div
-              className={`h-full transition-all duration-300 ${
-                quota.isExceeded ? 'bg-red-500' : 'bg-emerald-400'
+        {/* ESTADO DE CUOTA Y PLAN */}
+        <div className="mb-5 p-4 rounded-2xl bg-slate-900/80 border border-white/5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-300">Plan de Uso Diario</span>
+            <span
+              className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                trackerState.isRegistered
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
               }`}
-              style={{ width: `${Math.min(100, (quota.used / quota.max) * 100)}%` }}
-            />
+            >
+              {trackerState.isRegistered ? 'Verificado (10/día)' : 'Anónimo (3/día)'}
+            </span>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-400">Escaneos utilizados hoy:</span>
+              <span className="font-mono-numbers font-bold text-white">
+                {trackerState.count} / {quota.max}
+              </span>
+            </div>
+            {/* Barra de progreso */}
+            <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  quota.remaining > 0 ? 'bg-emerald-500' : 'bg-red-500'
+                }`}
+                style={{
+                  width: `${Math.min(100, (trackerState.count / quota.max) * 100)}%`,
+                }}
+              />
+            </div>
+            <div className="flex justify-between text-[11px] text-slate-400">
+              <span>Restantes: <strong className="text-emerald-400">{quota.remaining}</strong></span>
+              <span className="flex items-center gap-1">
+                <Clock className="w-3 h-3 text-slate-500" />
+                <span>Reinicia a medianoche</span>
+              </span>
+            </div>
           </div>
 
           {!trackerState.isRegistered && (
@@ -102,16 +155,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onClose();
                 onOpenRegistration();
               }}
-              className="w-full py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs transition flex items-center justify-center gap-2 active:scale-98 shadow-md shadow-emerald-500/20"
+              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-slate-950 font-bold text-xs tracking-wide transition flex items-center justify-center gap-2 shadow-md shadow-emerald-500/20 active:scale-98"
             >
               <UserPlus className="w-4 h-4" />
-              <span>Registrarse Gratis (10 escaneos/día)</span>
+              <span>Desbloquear 10 Escaneos Gratis</span>
             </button>
           )}
 
-          {trackerState.isRegistered && trackerState.userName && (
+          {trackerState.isRegistered && trackerState.userEmail && (
             <p className="text-[11px] text-slate-400">
-              Registrado a nombre de: <span className="text-slate-200 font-medium">{trackerState.userName}</span>
+              Correo verificado: <span className="text-slate-200 font-medium">{trackerState.userEmail}</span>
             </p>
           )}
         </div>
@@ -163,43 +216,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </p>
         </div>
 
-        {/* INSTALACIÓN PWA */}
-        {!isInstalled && (
-          <div className="mb-5 p-3 rounded-2xl bg-slate-900/60 border border-white/5">
-            <div className="flex items-center gap-2 mb-2">
-              <Smartphone className="w-4 h-4 text-emerald-400" />
-              <span className="text-xs font-semibold text-slate-200">Instalar como App (PWA)</span>
-            </div>
-
-            {isInstallable && (
-              <button
-                onClick={install}
-                className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition"
-              >
-                <Download className="w-4 h-4 text-emerald-400" />
-                Instalar en Pantalla de Inicio
-              </button>
-            )}
-
-            {isIOS && (
-              <>
-                <button
-                  onClick={() => setShowIOSPrompt(!showIOSPrompt)}
-                  className="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition"
-                >
-                  <Download className="w-4 h-4 text-emerald-400" />
-                  Instalar en iPhone / iPad
-                </button>
-                {showIOSPrompt && (
-                  <p className="mt-2 text-[11px] text-slate-400 bg-black/40 p-2.5 rounded-lg border border-white/5">
-                    1. Pulsa el botón <strong>Compartir</strong> en Safari.<br />
-                    2. Desplázate hacia abajo y selecciona <strong>Añadir a pantalla de inicio</strong>.
-                  </p>
-                )}
-              </>
-            )}
+        {/* SECCIÓN DESCARGAR APP */}
+        <div className="mb-5 p-3 rounded-2xl bg-slate-900/60 border border-white/5 space-y-2">
+          <div className="flex items-center gap-2">
+            <Smartphone className="w-4 h-4 text-emerald-400" />
+            <span className="text-xs font-semibold text-slate-200">Aplicación Móvil</span>
           </div>
-        )}
+
+          <button
+            onClick={handleDownloadAppClick}
+            className="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-98 text-slate-200 transition border border-white/10 shadow-sm flex items-center justify-between group"
+          >
+            <div className="flex items-center gap-2.5 text-left">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                <Smartphone className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white leading-tight">Descargar App</div>
+                <div className="text-[10px] text-emerald-400 font-medium leading-tight">Próximamente en tiendas</div>
+              </div>
+            </div>
+            <span className="text-[10px] py-1 px-2 rounded-md bg-white/10 text-slate-300 font-semibold group-hover:bg-emerald-500 group-hover:text-slate-950 transition">
+              Instalar
+            </span>
+          </button>
+
+          {showIOSPrompt && (
+            <p className="mt-2 text-[11px] text-slate-400 bg-black/40 p-2.5 rounded-lg border border-white/5">
+              1. Pulsa el botón <strong>Compartir</strong> en Safari.<br />
+              2. Desplázate hacia abajo y selecciona <strong>Añadir a pantalla de inicio</strong>.
+            </p>
+          )}
+        </div>
 
         {/* PRINCIPIOS ZERO-KNOWLEDGE */}
         <div className="p-3.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/20 space-y-1.5">

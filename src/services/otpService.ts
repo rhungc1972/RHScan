@@ -15,10 +15,7 @@ export interface VerifyOtpResponse {
   error?: string;
 }
 
-/**
- * Solicita el envío de un código OTP al correo del usuario
- */
-export async function sendOtpCode(name: string, email: string): Promise<SendOtpResponse> {
+export async function sendOtpCode(email: string, name: string = 'Usuario'): Promise<SendOtpResponse> {
   try {
     const response = await fetch('/api/send-otp', {
       method: 'POST',

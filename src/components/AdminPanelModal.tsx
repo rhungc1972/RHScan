@@ -19,13 +19,15 @@ import {
   FileCode,
   Shield,
   Layers,
+  MessageSquare,
 } from 'lucide-react';
-import { ScanTrackerState, Sha256AuditLogRecord } from '../types';
+import { ScanTrackerState, Sha256AuditLogRecord, FeedbackRecord } from '../types';
 import {
   getSha256AuditLogs,
   clearSha256AuditLogs,
 } from '../utils/metadataAudit';
 import { saveUsageState, getLocalDateString } from '../services/usageTracker';
+import { getFeedbackList, downloadFeedbackCsv } from '../utils/feedbackStorage';
 import { triggerHaptic } from '../utils/audioFeedback';
 
 interface AdminPanelModalProps {
@@ -34,7 +36,7 @@ interface AdminPanelModalProps {
   onRefreshTracker?: () => void;
 }
 
-type AdminTab = 'users' | 'sha256' | 'maintenance';
+type AdminTab = 'users' | 'sha256' | 'feedback' | 'maintenance';
 
 export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onClose,
@@ -47,6 +49,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const [activeTab, setActiveTab] = useState<AdminTab>('users');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [auditLogs, setAuditLogs] = useState<Sha256AuditLogRecord[]>([]);
+  const [feedbackList, setFeedbackList] = useState<FeedbackRecord[]>([]);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [maintenanceSuccess, setMaintenanceSuccess] = useState<string | null>(null);
 
@@ -56,6 +59,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   useEffect(() => {
     if (isAuthenticated) {
       setAuditLogs(getSha256AuditLogs());
+      setFeedbackList(getFeedbackList());
     }
   }, [isAuthenticated]);
 
@@ -98,18 +102,18 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     const diagnostic = {
       system: 'RHDocScan v2.4 (Zero-Knowledge)',
       timestamp: new Date().toISOString(),
-      dailyUsage: {
+      quota: {
         date: trackerState.date,
         count: trackerState.count,
         isRegistered: trackerState.isRegistered,
         userEmail: trackerState.userEmail,
-        userName: trackerState.userName,
-        unlimitedMonth: trackerState.unlimitedUntilMonth,
       },
       registeredUsersCount: registeredUsers.length,
       registeredUsers,
       auditLogsCount: auditLogs.length,
       auditLogs,
+      feedbackCount: feedbackList.length,
+      feedbackList,
       environment: {
         userAgent: navigator.userAgent,
         screen: `${window.screen.width}x${window.screen.height}`,
@@ -158,35 +162,48 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       setAuditLogs([]);
       setMaintenanceSuccess('Registro de auditoría SHA-256 vaciado.');
       setTimeout(() => setMaintenanceSuccess(null), 3000);
-      triggerHaptic(30);
+      triggerHaptic(40);
     }
   };
 
-  // Filtrado
+  // Filtrado de usuarios
   const filteredUsers = registeredUsers.filter(
     (u) =>
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Filtrado de auditoría
   const filteredLogs = auditLogs.filter(
     (l) =>
       l.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       l.sha256Hash.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Filtrado de sugerencias
+  const filteredFeedback = feedbackList.filter(
+    (fb) =>
+      fb.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      fb.message.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-fadeIn">
-      <div className="w-full max-w-lg rounded-3xl glass-panel-heavy p-5 sm:p-6 shadow-2xl border border-white/10 relative max-h-[92vh] flex flex-col overflow-hidden">
-        {/* Encabezado */}
-        <div className="flex items-center justify-between pb-3.5 border-b border-white/10 mb-3.5 flex-shrink-0">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/85 backdrop-blur-md animate-fadeIn">
+      <div className="w-full max-w-lg rounded-3xl glass-panel-heavy p-5 shadow-2xl border border-white/10 relative max-h-[92vh] flex flex-col overflow-hidden">
+        {/* Cabecera del Panel */}
+        <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3 flex-shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
-              <ShieldAlert className="w-4 h-4" />
+            <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center font-bold">
+              <KeyRound className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-white text-base">Panel de Administración</h3>
-              <p className="text-[10px] text-slate-400">Control Local & Auditoría Criptográfica</p>
+              <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
+                <span>Panel de Control & Auditoría</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  2089227
+                </span>
+              </h3>
+              <p className="text-[11px] text-slate-400">Trazabilidad Zero-Knowledge y Gestión Interna</p>
             </div>
           </div>
           <button
@@ -206,7 +223,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
             <div className="text-center">
               <h4 className="text-sm font-bold text-white mb-1">Acceso Administrativo Protegido</h4>
-              <p className="text-xs text-slate-400">Ingresa la clave maestra para consultar métricas, inscritos y hashes SHA-256.</p>
+              <p className="text-xs text-slate-400">Ingresa la clave maestra para consultar métricas, inscritos, sugerencias y hashes SHA-256.</p>
             </div>
 
             {errorMsg && (
@@ -239,25 +256,32 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           /* PANTALLA 2: DASHBOARD MULTI-PESTAÑA */
           <div className="flex-1 flex flex-col overflow-hidden space-y-3">
             {/* Tarjetas de Métricas Rápidas */}
-            <div className="grid grid-cols-3 gap-2 flex-shrink-0">
-              <div className="p-2.5 rounded-2xl bg-slate-900/90 border border-white/5 text-center">
-                <span className="text-[10px] text-slate-400 block mb-0.5">Escaneos Hoy</span>
-                <span className="text-lg font-bold font-mono-numbers text-emerald-400">
+            <div className="grid grid-cols-4 gap-2 flex-shrink-0">
+              <div className="p-2 rounded-xl bg-slate-900/90 border border-white/5 text-center">
+                <span className="text-[9px] text-slate-400 block">Escaneos Hoy</span>
+                <span className="text-base font-bold font-mono-numbers text-emerald-400">
                   {trackerState.count}
                 </span>
               </div>
 
-              <div className="p-2.5 rounded-2xl bg-slate-900/90 border border-white/5 text-center">
-                <span className="text-[10px] text-slate-400 block mb-0.5">Inscritos</span>
-                <span className="text-lg font-bold font-mono-numbers text-purple-400">
+              <div className="p-2 rounded-xl bg-slate-900/90 border border-white/5 text-center">
+                <span className="text-[9px] text-slate-400 block">Inscritos</span>
+                <span className="text-base font-bold font-mono-numbers text-purple-400">
                   {registeredUsers.length}
                 </span>
               </div>
 
-              <div className="p-2.5 rounded-2xl bg-slate-900/90 border border-white/5 text-center">
-                <span className="text-[10px] text-slate-400 block mb-0.5">Hashes SHA-256</span>
-                <span className="text-lg font-bold font-mono-numbers text-cyan-400">
+              <div className="p-2 rounded-xl bg-slate-900/90 border border-white/5 text-center">
+                <span className="text-[9px] text-slate-400 block">Hashes SHA</span>
+                <span className="text-base font-bold font-mono-numbers text-cyan-400">
                   {auditLogs.length}
+                </span>
+              </div>
+
+              <div className="p-2 rounded-xl bg-slate-900/90 border border-white/5 text-center">
+                <span className="text-[9px] text-slate-400 block">Sugerencias</span>
+                <span className="text-base font-bold font-mono-numbers text-amber-400">
+                  {feedbackList.length}
                 </span>
               </div>
             </div>
@@ -267,49 +291,65 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               <button
                 type="button"
                 onClick={() => { setActiveTab('users'); setSearchTerm(''); }}
-                className={`flex-1 py-1.5 rounded-lg font-semibold transition flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-1.5 rounded-lg font-semibold transition flex items-center justify-center gap-1 ${
                   activeTab === 'users'
                     ? 'bg-purple-600 text-white shadow'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <Users className="w-3.5 h-3.5" />
-                <span>Inscritos ({registeredUsers.length})</span>
+                <span>Inscritos</span>
               </button>
               <button
                 type="button"
                 onClick={() => { setActiveTab('sha256'); setSearchTerm(''); }}
-                className={`flex-1 py-1.5 rounded-lg font-semibold transition flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-1.5 rounded-lg font-semibold transition flex items-center justify-center gap-1 ${
                   activeTab === 'sha256'
                     ? 'bg-purple-600 text-white shadow'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <FileCode className="w-3.5 h-3.5" />
-                <span>Auditoría SHA-256 ({auditLogs.length})</span>
+                <span>Hashes</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('feedback');
+                  setSearchTerm('');
+                  setFeedbackList(getFeedbackList());
+                }}
+                className={`flex-1 py-1.5 rounded-lg font-semibold transition flex items-center justify-center gap-1 ${
+                  activeTab === 'feedback'
+                    ? 'bg-purple-600 text-white shadow'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Ver Sugerencias</span>
               </button>
               <button
                 type="button"
                 onClick={() => { setActiveTab('maintenance'); setSearchTerm(''); }}
-                className={`flex-1 py-1.5 rounded-lg font-semibold transition flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-1.5 rounded-lg font-semibold transition flex items-center justify-center gap-1 ${
                   activeTab === 'maintenance'
                     ? 'bg-purple-600 text-white shadow'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <Activity className="w-3.5 h-3.5" />
-                <span>Mantenimiento</span>
+                <span>Control</span>
               </button>
             </div>
 
+            {/* Aviso de Acción */}
             {maintenanceSuccess && (
-              <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 flex-shrink-0">
-                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                <span>{maintenanceSuccess}</span>
+              <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs text-center font-medium animate-fadeIn flex-shrink-0">
+                {maintenanceSuccess}
               </div>
             )}
 
-            {/* CONTENIDO DE LA PESTAÑA 1: USUARIOS */}
+            {/* CONTENIDO DE LA PESTAÑA 1: USUARIOS INSCRITOS */}
             {activeTab === 'users' && (
               <div className="flex-1 flex flex-col overflow-hidden space-y-2">
                 <div className="flex items-center justify-between gap-2 flex-shrink-0">
@@ -317,7 +357,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                     <input
                       type="text"
-                      placeholder="Buscar por nombre o correo..."
+                      placeholder="Buscar inscrito..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="w-full py-1.5 pl-8 pr-3 rounded-xl bg-slate-900 border border-white/10 text-xs text-white focus:outline-none focus:border-purple-400"
@@ -326,27 +366,27 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   <div className="flex items-center gap-1">
                     <button
                       onClick={handleExportCsv}
-                      title="Descargar CSV"
                       className="py-1.5 px-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs flex items-center gap-1 transition"
+                      title="Descargar Inscritos en CSV"
                     >
                       <Download className="w-3.5 h-3.5" />
                       <span>CSV</span>
                     </button>
                     <button
                       onClick={handleExportUsersJson}
-                      title="Descargar JSON"
-                      className="py-1.5 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1 transition"
+                      className="py-1.5 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs flex items-center gap-1 transition border border-white/10"
+                      title="Descargar Inscritos en JSON"
                     >
-                      <FileCode className="w-3.5 h-3.5" />
+                      <Download className="w-3.5 h-3.5" />
                       <span>JSON</span>
                     </button>
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto rounded-2xl bg-slate-900/80 border border-white/5 p-2">
+                <div className="flex-1 overflow-y-auto rounded-xl bg-slate-900/60 border border-white/5 p-2">
                   <table className="w-full text-left text-xs">
                     <thead>
-                      <tr className="border-b border-white/10 text-slate-400 text-[11px]">
+                      <tr className="text-slate-400 border-b border-white/10 text-[11px]">
                         <th className="pb-1.5 pl-2">Nombre</th>
                         <th className="pb-1.5">Correo</th>
                         <th className="pb-1.5 pr-2 text-right">Fecha</th>
@@ -447,7 +487,63 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               </div>
             )}
 
-            {/* CONTENIDO DE LA PESTAÑA 3: MANTENIMIENTO & DEBUG */}
+            {/* CONTENIDO DE LA PESTAÑA 3: VER SUGERENCIAS (REQUISITO 3) */}
+            {activeTab === 'feedback' && (
+              <div className="flex-1 flex flex-col overflow-hidden space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-shrink-0">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Buscar en comentarios..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full py-1.5 pl-8 pr-3 rounded-xl bg-slate-900 border border-white/10 text-xs text-white focus:outline-none focus:border-purple-400"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      downloadFeedbackCsv();
+                      triggerHaptic(20);
+                    }}
+                    className="py-1.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition shadow-sm"
+                    title="Descargar sugerencias_rhdocscan.csv"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Descargar Sugerencias (CSV)</span>
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                  {filteredFeedback.map((fb) => (
+                    <div
+                      key={fb.id}
+                      className="p-3 rounded-2xl bg-slate-900/90 border border-white/10 space-y-1.5 text-xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-emerald-400 flex items-center gap-1">
+                          <span>{fb.name}</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono-numbers">
+                          {fb.timestamp}
+                        </span>
+                      </div>
+                      <p className="text-slate-200 text-xs leading-relaxed bg-black/40 p-2.5 rounded-xl border border-white/5">
+                        {fb.message}
+                      </p>
+                    </div>
+                  ))}
+
+                  {filteredFeedback.length === 0 && (
+                    <div className="py-8 text-center text-slate-500 text-xs">
+                      No hay sugerencias registradas por los usuarios aún.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* CONTENIDO DE LA PESTAÑA 4: MANTENIMIENTO & DEBUG */}
             {activeTab === 'maintenance' && (
               <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs">
                 <div className="p-3 rounded-2xl bg-slate-900/80 border border-white/10 space-y-2">
