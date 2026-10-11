@@ -193,12 +193,17 @@ export default function App() {
     setIsReviewOpen(false);
   }, []);
 
-  // 7. Registro exitoso tras validar OTP
+  // 7. Registro exitoso tras validar OTP o código de pruebas
   const handleRegistrationSuccess = useCallback((name: string, email: string) => {
     const updated = getUsageState();
     setTrackerState(updated);
     setIsRegistrationOpen(false);
-  }, []);
+    if (email.includes('2089227') || email.includes('tester')) {
+      showToast('✅ Modo Pruebas Activado: Escaneos Ilimitados por 2 Horas');
+    } else {
+      showToast(`¡Registro verificado! Bienvenido, ${name}`);
+    }
+  }, [showToast]);
 
   return (
     <div
@@ -208,21 +213,23 @@ export default function App() {
         minHeight: '-webkit-fill-available',
       }}
     >
-      {/* VISTA PRINCIPAL DE CÁMARA */}
-      <CameraView
-        onCaptureFrame={handleCaptureFrame}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenReview={() => setIsReviewOpen(true)}
-        onShareApp={handleShareApp}
-        pages={pages}
-        maxPages={MAX_PAGES_PER_DOCUMENT}
-        isQuotaExceeded={isQuotaExceeded}
-        scanMode={scanMode}
-        onToggleScanMode={setScanMode}
-        preferredFilter={preferredFilter}
-        exportFormat={exportFormat}
-        onChangeExportFormat={setExportFormat}
-      />
+      {/* VISTA PRINCIPAL DE CÁMARA (Oculta completamente durante la pantalla de recorte) */}
+      <div style={{ display: capturedImage ? 'none' : 'block', width: '100%', height: '100%' }}>
+        <CameraView
+          onCaptureFrame={handleCaptureFrame}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenReview={() => setIsReviewOpen(true)}
+          onShareApp={handleShareApp}
+          pages={pages}
+          maxPages={MAX_PAGES_PER_DOCUMENT}
+          isQuotaExceeded={isQuotaExceeded}
+          scanMode={scanMode}
+          onToggleScanMode={setScanMode}
+          preferredFilter={preferredFilter}
+          exportFormat={exportFormat}
+          onChangeExportFormat={setExportFormat}
+        />
+      </div>
 
       {/* TOAST DE NOTIFICACIÓN GLOBAL (EJ. ENLACE COPIADO) */}
       {toastMessage && (

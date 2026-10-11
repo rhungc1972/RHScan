@@ -149,9 +149,43 @@ export function setUnlimitedMonth(month: number): ScanTrackerState {
 }
 
 /**
+ * Comprueba si el modo de pruebas ilimitado (2 horas) está activo
+ */
+export function isTestModeActive(): boolean {
+  try {
+    const expiresStr = localStorage.getItem('rhdocscan_test_mode_expires');
+    const isUnlimited = localStorage.getItem('rhdocscan_is_unlimited');
+    if (isUnlimited === 'true' && expiresStr) {
+      const expires = parseInt(expiresStr, 10);
+      if (Date.now() < expires) {
+        return true;
+      } else {
+        localStorage.removeItem('rhdocscan_test_mode_expires');
+        localStorage.removeItem('rhdocscan_is_unlimited');
+      }
+    }
+  } catch (e) {
+    console.warn('Error comprobando modo de pruebas:', e);
+  }
+  return false;
+}
+
+/**
+ * Activa modo de pruebas ilimitado por 2 horas mediante clave 2089227
+ */
+export function activateTestMode2Hours(): void {
+  const expireTime = Date.now() + 2 * 60 * 60 * 1000;
+  localStorage.setItem('rhdocscan_test_mode_expires', expireTime.toString());
+  localStorage.setItem('rhdocscan_is_unlimited', 'true');
+}
+
+/**
  * Comprueba si el usuario tiene cupo disponible hoy (o acceso ilimitado)
  */
 export function hasQuotaAvailable(state: ScanTrackerState): boolean {
+  if (isTestModeActive()) {
+    return true; // Acceso ilimitado por modo de pruebas (clave 2089227)
+  }
   const currentMonth = new Date().getMonth() + 1;
   if (state.unlimitedUntilMonth === currentMonth) {
     return true; // Acceso ilimitado por clave mensual
@@ -171,6 +205,17 @@ export function getQuotaInfo(state: ScanTrackerState): {
   isExceeded: boolean;
   isUnlimited: boolean;
 } {
+  if (isTestModeActive()) {
+    return {
+      used: state.count,
+      max: 999,
+      remaining: 999,
+      isRegistered: true,
+      isExceeded: false,
+      isUnlimited: true,
+    };
+  }
+
   const currentMonth = new Date().getMonth() + 1;
   const isUnlimited = state.unlimitedUntilMonth === currentMonth;
 

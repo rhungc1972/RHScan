@@ -39,14 +39,39 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
-  // Paso 1: Enviar OTP únicamente con correo electrónico
+  // Paso 1: Enviar OTP únicamente con correo electrónico o activar clave de pruebas
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    const cleanEmail = email.trim();
-    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
-      setErrorMessage('Por favor ingresa una dirección de correo válida.');
+    const inputVal = email.trim();
+
+    // CLAVE DE DESBLOQUEO POR 2 HORAS: 2089227 (EN CAMPO DE CORREO)
+    if (inputVal === '2089227') {
+      const expireTime = Date.now() + 2 * 60 * 60 * 1000;
+      localStorage.setItem('rhdocscan_test_mode_expires', expireTime.toString());
+      localStorage.setItem('rhdocscan_is_unlimited', 'true');
+      triggerHaptic(60);
+
+      // Lanzar confeti de celebración
+      try {
+        confetti({
+          particleCount: 80,
+          spread: 70,
+          origin: { y: 0.6 },
+          colors: ['#10b981', '#38bdf8', '#34d399', '#f59e0b'],
+        });
+      } catch {
+        // Fallback si no está disponible canvas-confetti
+      }
+
+      onSuccess('Modo Pruebas 2H', 'tester-2089227@rhdocscan.internal');
+      onClose();
+      return;
+    }
+
+    if (!inputVal || !inputVal.includes('@') || !inputVal.includes('.')) {
+      setErrorMessage('Por favor ingresa una dirección de correo válida o código de acceso.');
       return;
     }
 
@@ -55,8 +80,8 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({
 
     try {
       // Nombre derivado del correo (ej: "roberto" de "roberto@gmail.com")
-      const derivedName = cleanEmail.split('@')[0];
-      const response = await sendOtpCode(cleanEmail, derivedName);
+      const derivedName = inputVal.split('@')[0];
+      const response = await sendOtpCode(inputVal, derivedName);
 
       if (response.success && response.token) {
         setToken(response.token);

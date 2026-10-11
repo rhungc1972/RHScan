@@ -5,6 +5,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   RotateCw,
+  RotateCcw,
   Sliders,
   Check,
   X,
@@ -15,6 +16,8 @@ import {
   Palette,
   FileCheck,
   Maximize2,
+  ArrowRight,
+  Loader2,
 } from 'lucide-react';
 import { Quad, Point, ScanFilter, ScannedPage } from '../types';
 import { warpPerspective, applyImageFilter } from '../utils/cvEngine';
@@ -297,8 +300,15 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-[#0a0f18] flex flex-col select-none touch-none app-viewport"
-      style={{ height: '100dvh', minHeight: '-webkit-fill-available' }}
+      className="fixed inset-0 z-[100000] bg-[#0a0f18] flex flex-col select-none touch-none app-viewport"
+      style={{
+        display: 'flex',
+        position: 'fixed',
+        inset: 0,
+        zIndex: 100000,
+        height: '100dvh',
+        minHeight: '-webkit-fill-available',
+      }}
     >
       {/* BARRA SUPERIOR */}
       <div className="pt-safe px-safe py-3 flex items-center justify-between border-b border-white/10 glass-panel z-20">
@@ -497,38 +507,36 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
         </button>
       </div>
 
-      {/* BARRA INFERIOR DE ACCIONES */}
-      <div className="pb-safe px-safe pt-2 bg-[#0c0f14] border-t border-white/5 flex items-center justify-between gap-3 z-20">
-        {/* Botón de alternar previsualización aplanada */}
+      {/* BARRA INFERIOR DE ACCIONES: ÚNICAMENTE DOS BOTONES */}
+      <div className="pb-safe px-safe pt-2.5 pb-3 bg-[#0c0f14] border-t border-white/10 flex items-center justify-between gap-3 z-20">
+        {/* Botón 1: 🔄 Repetir foto */}
         <button
-          onClick={handleTogglePreview}
+          onClick={onCancel}
           disabled={isProcessing}
-          className="py-3 px-3.5 rounded-xl glass-panel text-xs font-semibold text-slate-300 hover:text-white transition flex items-center gap-1.5 active:scale-95"
+          className="flex-1 py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs tracking-wide transition flex items-center justify-center gap-2 border border-slate-700/80 active:scale-95 shadow-md"
+          title="Descartar captura y volver a la cámara"
         >
-          <Maximize2 className="w-4 h-4 text-emerald-400" />
-          <span>{showPreviewMode ? 'Editar' : 'Vista Previa'}</span>
+          <RotateCcw className="w-4 h-4 text-emerald-400" />
+          <span>🔄 Repetir foto</span>
         </button>
 
-        {/* Botón: Añadir otra página (si páginas < 10) */}
-        {currentPageCount + 1 < maxPages && (
-          <button
-            onClick={() => handleConfirmSave(true)}
-            disabled={isProcessing}
-            className="flex-1 py-3 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs transition border border-slate-700 flex items-center justify-center gap-1.5 active:scale-95 shadow-md"
-          >
-            <Plus className="w-4 h-4 text-emerald-400" />
-            <span>Añadir Otra ({currentPageCount + 1}/{maxPages})</span>
-          </button>
-        )}
-
-        {/* Botón de avance con el texto exacto: Continuar */}
+        {/* Botón 2 (Destacado): Continuar ➔ */}
         <button
           onClick={() => handleConfirmSave(false)}
           disabled={isProcessing}
-          className="flex-1 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs tracking-wide transition flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/25 active:scale-95"
+          className="flex-1 py-3.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs tracking-wide transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 active:scale-95 disabled:opacity-50"
         >
-          <Check className="w-4 h-4" />
-          <span>{isProcessing ? 'Procesando...' : 'Continuar'}</span>
+          {isProcessing ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>Procesando...</span>
+            </>
+          ) : (
+            <>
+              <span>Continuar</span>
+              <ArrowRight className="w-4 h-4" />
+            </>
+          )}
         </button>
       </div>
     </div>
