@@ -4,16 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>RHDocScan - Escáner Móvil Privado</title>
-    <meta name="description" content="RHDocScan: Escáner móvil PWA con marco Folio/Oficio, visión por computadora 100% local (Zero-Knowledge) y exportación directa a PDF." />
+    <meta name="description" content="RHDocScan: Escáner móvil PWA con arquitectura de máquina de estados finitos, marco Folio/Oficio, visión por computadora 100% local (Zero-Knowledge) y exportación directa a PDF." />
     
     <!-- Open Graph / Social -->
     <meta property="og:title" content="RHDocScan - Escáner Móvil Privado" />
-    <meta property="og:description" content="RHDocScan: Escáner móvil PWA con marco Folio/Oficio, visión por computadora 100% local (Zero-Knowledge) y exportación directa a PDF." />
+    <meta property="og:description" content="RHDocScan: Escáner móvil PWA con arquitectura FSM, marco Folio/Oficio y visión por computadora local." />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="/pwa-512x512.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="RHDocScan - Escáner Móvil Privado" />
-    <meta name="twitter:description" content="RHDocScan: Escáner móvil PWA con procesamiento de visión por computadora 100% local." />
+    <meta name="twitter:description" content="RHDocScan: Escáner móvil PWA con arquitectura FSM y procesamiento de visión por computadora 100% local." />
 
     <!-- PWA & Mobile Capabilities -->
     <meta name="theme-color" content="#0a0f18" />
@@ -34,8 +34,18 @@
     <!-- Global Styles & Safari Ergonomics -->
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="bg-[#0a0f18] text-slate-100 antialiased select-none overflow-hidden touch-none font-sans app-viewport" style="height: 100dvh; min-height: -webkit-fill-available;">
-    <div id="root" style="height: 100dvh; min-height: -webkit-fill-available;"></div>
+  <body class="bg-[#0a0f18] text-slate-100 antialiased select-none overflow-hidden touch-none font-sans app-viewport" style="height: 100dvh; min-height: -webkit-fill-available;" data-screen="screen-camera">
+    <!-- Contenedor Raíz de la Aplicación (Soporta montaje React y semántica FSM nativa) -->
+    <div id="root" style="height: 100dvh; min-height: -webkit-fill-available;">
+      <!-- ESTADO 1: CÁMARA (Activo por defecto) -->
+      <div id="screen-camera" class="screen-state screen-active"></div>
+      <!-- ESTADO 2: RECORTE Y CONFIRMACIÓN -->
+      <div id="screen-crop" class="screen-state screen-hidden" style="display: none !important;"></div>
+      <!-- ESTADO 3: GALERÍA DE PÁGINAS ACUMULADAS -->
+      <div id="screen-gallery" class="screen-state screen-hidden" style="display: none !important;"></div>
+      <!-- ESTADO 4: ÉXITO / POST-DESPACHO -->
+      <div id="screen-success" class="screen-state screen-hidden" style="display: none !important;"></div>
+    </div>
     <script type="module" src="/app.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -1,18 +1,26 @@
 /**
- * app.js - RHDocScan (Zero-Knowledge Client-Side Document Scanner)
- * Arquitectura 100% Client-Side lista para producción y Netlify.
- * Optimizado para iOS Safari (iPhone), Android y PWA:
- * - Corrección de altura 100dvh / -webkit-fill-available
- * - Barra inferior de controles fijada en calc(25px + env(safe-area-inset-bottom)) con aceleración 3D translateZ(0)
- * - Compatibilidad de cámara con playsinline, webkit-playsinline y restricciones resilientes
- * - Homografía proyectiva (warp perspective) con interpolación bilineal
- * - Web Share API Nivel 2 y fallback de descarga
+ * app.js - RHDocScan v2.0.0
+ * Zero-Knowledge Client-Side Document Scanner & FSM Architecture
+ * 
+ * Arquitectura de MÁQUINA DE ESTADOS FINITOS (FSM) 100% Client-Side lista para producción:
+ * - 4 Estados de Pantalla Mutuamente Excluyentes:
+ *   1. ESTADO_CAMARA ('screen-camera'): Cámara en vivo, encuadre Folio y obturador.
+ *   2. ESTADO_RECORTE ('screen-crop'): Imagen congelada en alta resolución, 4 esquinas verdes,
+ *      ÚNICAMENTE 2 botones: "🔄 Repetir foto" y "Continuar ➔".
+ *   3. ESTADO_GALERIA ('screen-gallery'): Miniaturas de páginas acumuladas, botón "[+ 📷 Tomar otra página]",
+ *      metadatos SHA-256 y botón "Guardar / Enviar".
+ *   4. ESTADO_EXITO ('screen-success'): Confirmación de despacho, "[+ Iniciar Nuevo Escaneo]" y "Compartir App".
+ * - Enrutador centralizado: switchScreen(screenId)
+ * - Homografía proyectiva bilineal (warp perspective) en memoria de Canvas
+ * - Soporte WebKit / Safari iOS con corrección 100dvh y supresión absoluta de controles fuera de cámara
+ * - Clave de pruebas ilimitada 2 horas: 2089227 en campo de correo
+ * - Web Share API Nivel 2 y fallback de descarga directa
  * - Módulo de Observaciones y Sugerencias ('rhdocscan_feedback') con descarga CSV (BOM UTF-8)
- * - Registro simplificado por correo electrónico
- * - Compartir aplicación y aviso de disponibilidad en tiendas
  */
 
-// 1. CONSTANTES Y CONFIGURACIÓN
+// ============================================================================
+// 1. CONSTANTES Y CONFIGURACIÓN GLOBAL
+// ============================================================================
 const DAILY_LIMITS = {
   ANONYMOUS: 3,
   REGISTERED: 10,
@@ -21,8 +29,56 @@ const DAILY_LIMITS = {
 
 const STORAGE_KEY = 'scan_tracker';
 const FEEDBACK_STORAGE_KEY = 'rhdocscan_feedback';
+const TEST_EXPIRE_KEY = 'rhdocscan_test_mode_expires';
+const TEST_UNLIMITED_KEY = 'rhdocscan_is_unlimited';
 
-// 2. MÓDULO DE PERSISTENCIA Y LÍMITES LOCALES
+// ============================================================================
+// 2. MÁQUINA DE ESTADOS FINITOS (FSM) - ENRUTADOR CENTRALIZADO
+// ============================================================================
+const APP_SCREENS = ['screen-camera', 'screen-crop', 'screen-gallery', 'screen-success'];
+
+/**
+ * Conmuta la pantalla activa garantizando exclusión mutua estricta.
+ * Aplica display: flex !important a la pantalla seleccionada y display: none !important a las demás.
+ * @param {string} screenId - ID de la pantalla de destino ('screen-camera', 'screen-crop', 'screen-gallery', 'screen-success')
+ */
+function switchScreen(screenId) {
+  if (!APP_SCREENS.includes(screenId)) {
+    console.warn(`[FSM] Pantalla desconocida: ${screenId}`);
+    return;
+  }
+
+  // Establecer atributo en el body para control CSS inmediato
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.setAttribute('data-screen', screenId);
+  }
+
+  APP_SCREENS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      if (id === screenId) {
+        el.style.setProperty('display', 'flex', 'important');
+        el.classList.add('screen-active');
+        el.classList.remove('screen-hidden');
+      } else {
+        el.style.setProperty('display', 'none', 'important');
+        el.classList.remove('screen-active');
+        el.classList.add('screen-hidden');
+      }
+    }
+  });
+
+  // Notificar al adaptador de cámara para pausar/reanudar bucles
+  if (screenId !== 'screen-camera') {
+    SafariCameraAdapter.pauseDetectionLoop();
+  } else {
+    SafariCameraAdapter.resumeDetectionLoop();
+  }
+}
+
+// ============================================================================
+// 3. MÓDULO DE PERSISTENCIA Y GESTIÓN DE CUOTAS
+// ============================================================================
 class UsageTracker {
   static getTodayString() {
     const d = new Date();
@@ -84,28 +140,35 @@ class UsageTracker {
     return s;
   }
 
+  /**
+   * Comprueba si el modo de pruebas ilimitado (2 horas) está activo
+   */
   static isUnlimitedActive() {
     try {
-      const expiresStr = localStorage.getItem('rhdocscan_test_mode_expires');
-      const isUnlimited = localStorage.getItem('rhdocscan_is_unlimited');
+      const expiresStr = localStorage.getItem(TEST_EXPIRE_KEY);
+      const isUnlimited = localStorage.getItem(TEST_UNLIMITED_KEY);
       if (isUnlimited === 'true' && expiresStr) {
-        if (Date.now() < parseInt(expiresStr, 10)) {
+        const expireTime = parseInt(expiresStr, 10);
+        if (!isNaN(expireTime) && Date.now() < expireTime) {
           return true;
         }
       }
     } catch (e) {
-      console.warn(e);
+      console.warn('Error comprobando modo de prueba:', e);
     }
     return false;
   }
 
+  /**
+   * Valida la clave secreta 2089227 para desbloqueo de 2 horas continuas
+   */
   static checkUnlockKey(inputVal) {
     if (!inputVal) return false;
     const clean = inputVal.trim();
     if (clean === '2089227') {
       const expireTime = Date.now() + (2 * 60 * 60 * 1000);
-      localStorage.setItem('rhdocscan_test_mode_expires', expireTime.toString());
-      localStorage.setItem('rhdocscan_is_unlimited', 'true');
+      localStorage.setItem(TEST_EXPIRE_KEY, expireTime.toString());
+      localStorage.setItem(TEST_UNLIMITED_KEY, 'true');
       return true;
     }
     return false;
@@ -132,7 +195,9 @@ class UsageTracker {
   }
 }
 
-// 3. MÓDULO MATEMÁTICO: HOMOGRAFÍA PROYECTIVA Y RECORTE
+// ============================================================================
+// 4. MÓDULO MATEMÁTICO: HOMOGRAFÍA PROYECTIVA Y RECORTE BILINEAL
+// ============================================================================
 class GeometryEngine {
   /**
    * Resuelve el sistema lineal 8x8 para obtener la matriz de homografía 3x3 normalizada
@@ -205,9 +270,9 @@ class GeometryEngine {
   }
 
   /**
-   * Endereza la perspectiva de la imagen con interpolación bilineal
+   * Endereza la perspectiva de la imagen con interpolación bilineal de alta resolución
    */
-  static async warpPerspective(sourceImage, corners, outputW = 1000, outputH = 1450) {
+  static async warpPerspective(sourceImage, corners, outputW = 1000, outputH = 1414) {
     const sw = sourceImage.naturalWidth || sourceImage.width;
     const sh = sourceImage.naturalHeight || sourceImage.height;
 
@@ -275,7 +340,9 @@ class GeometryEngine {
   }
 }
 
-// 4. MÓDULO DE GESTIÓN DE OBSERVACIONES Y SUGERENCIAS
+// ============================================================================
+// 5. MÓDULO DE OBSERVACIONES Y SUGERENCIAS CON EXPORTACIÓN CSV
+// ============================================================================
 class FeedbackService {
   static getFeedbackList() {
     try {
@@ -348,7 +415,9 @@ class FeedbackService {
   }
 }
 
-// 5. MÓDULO DE DESPACHO Y WEB SHARE API
+// ============================================================================
+// 6. MÓDULO DE DESPACHO Y COMPARTICIÓN (WEB SHARE API)
+// ============================================================================
 class DocumentShareService {
   static async sharePdf(pdfBlob, filename = 'RHDocScan_Documento.pdf') {
     const file = new File([pdfBlob], filename, { type: 'application/pdf' });
@@ -366,7 +435,7 @@ class DocumentShareService {
       }
     }
 
-    // Respaldo de descarga
+    // Fallback descarga directa
     const url = URL.createObjectURL(pdfBlob);
     const a = document.createElement('a');
     a.href = url;
@@ -414,8 +483,12 @@ class DocumentShareService {
   }
 }
 
-// 6. CONTROLADOR DE CÁMARA Y ADAPTACIONES PARA SAFARI iOS
+// ============================================================================
+// 7. CONTROLADOR DE CÁMARA Y ADAPTACIONES PARA SAFARI iOS (WEBKIT)
+// ============================================================================
 class SafariCameraAdapter {
+  static detectionAnimationId = null;
+
   static initViewportFix() {
     const setViewportHeight = () => {
       const vh = window.innerHeight;
@@ -429,7 +502,6 @@ class SafariCameraAdapter {
   static async startCameraStream(videoElement, facingMode = 'environment') {
     if (!videoElement) return null;
 
-    // Asegurar atributos requeridos por WebKit / iOS Safari
     videoElement.setAttribute('autoplay', '');
     videoElement.setAttribute('playsinline', '');
     videoElement.setAttribute('webkit-playsinline', '');
@@ -448,7 +520,7 @@ class SafariCameraAdapter {
     try {
       stream = await navigator.mediaDevices.getUserMedia(idealConstraints);
     } catch (e) {
-      console.warn('Fallo getUserMedia con resolución ideal, intentando fallback iOS:', e);
+      console.warn('Fallback a restricciones básicas en Safari iOS:', e);
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { facingMode: { ideal: facingMode } },
@@ -465,16 +537,31 @@ class SafariCameraAdapter {
     return stream;
   }
 
+  static pauseDetectionLoop() {
+    if (this.detectionAnimationId) {
+      cancelAnimationFrame(this.detectionAnimationId);
+      this.detectionAnimationId = null;
+    }
+  }
+
+  static resumeDetectionLoop() {
+    // Si hay un método de loop registrado, reanudar
+    if (typeof window._rhdocscan_resume_loop === 'function') {
+      window._rhdocscan_resume_loop();
+    }
+  }
+
   /**
    * Captura robusta directa por Canvas para WebKit / iOS Safari
    * Evita APIs incompatibles como ImageCapture.takePhoto() y bucles congelados
    */
-  static async captureFrame(video, detectionAnimationId, onRecorteCallback) {
+  static async captureFrame(video, animationFrameId, onRecorteCallback) {
     try {
       if (!video || video.readyState < 2) {
-        console.warn("Video aún no listo");
+        console.warn("Video aún no listo para captura.");
         return null;
       }
+
       // Crear canvas temporal con la resolución nativa del sensor
       const captureCanvas = document.createElement('canvas');
       captureCanvas.width = video.videoWidth || 1920;
@@ -484,24 +571,26 @@ class SafariCameraAdapter {
         throw new Error("No se pudo obtener contexto 2D para la captura.");
       }
       ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-      
+
       // Guardar la imagen capturada en memoria
       const capturedImageData = captureCanvas.toDataURL('image/jpeg', 0.95);
-      
-      // Detener temporalmente el loop de auto-detección
-      if (detectionAnimationId) {
-        cancelAnimationFrame(detectionAnimationId);
+
+      // Detener bucle de detección en vivo
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
       }
-      
-      // Pasar a la pantalla de recorte y ajuste fino
+      this.pauseDetectionLoop();
+
+      // Transición inmediata a pantalla de recorte (FSM: ESTADO_RECORTE)
+      switchScreen('screen-crop');
+
       if (typeof onRecorteCallback === 'function') {
         onRecorteCallback(capturedImageData);
-      } else if (typeof window.mostrarPantallaRecorte === 'function') {
-        window.mostrarPantallaRecorte(capturedImageData);
       }
+
       return capturedImageData;
     } catch (err) {
-      console.error("Error al capturar en iOS:", err);
+      console.error("Error al capturar en iOS Safari:", err);
       alert("Error al capturar imagen: " + err.message);
       return null;
     }
@@ -516,6 +605,7 @@ class SafariCameraAdapter {
     if (detectedCorners && Array.isArray(detectedCorners) && detectedCorners.length === 4) {
       return detectedCorners;
     }
+
     // Fallback: Marco tamaño Folio/Oficio (proporción 1:1.45)
     const folioAspect = 1.45;
     const marginRatio = 0.84;
@@ -542,39 +632,29 @@ class SafariCameraAdapter {
   }
 }
 
-/**
- * Transición de pantalla a recorte y ajuste fino en el DOM
- */
-function mostrarPantallaRecorte(imgData) {
-  const cameraScreen = document.querySelector('.camera-screen, .camera-view, #camera-container');
-  if (cameraScreen) {
-    cameraScreen.style.display = 'none';
-  }
-  const cropScreen = document.querySelector('.crop-screen, .perspective-editor, #crop-container');
-  if (cropScreen) {
-    cropScreen.style.display = 'flex';
-    cropScreen.style.position = 'fixed';
-    cropScreen.style.inset = '0';
-    cropScreen.style.zIndex = '100000';
-  }
-  const previewImg = document.querySelector('#captured-preview-img, .captured-preview');
-  if (previewImg && imgData) {
-    previewImg.src = imgData;
-  }
-}
-
-// Inicialización automática de adaptaciones
+// ============================================================================
+// 8. INICIALIZACIÓN GLOBAL Y EXPORTACIÓN AL ENTORNO WINDOW
+// ============================================================================
 if (typeof window !== 'undefined') {
   SafariCameraAdapter.initViewportFix();
+  window.switchScreen = switchScreen;
   window.captureFrame = SafariCameraAdapter.captureFrame;
-  window.mostrarPantallaRecorte = mostrarPantallaRecorte;
   window.RHDocScan = {
+    switchScreen,
     UsageTracker,
     GeometryEngine,
     FeedbackService,
     DocumentShareService,
     SafariCameraAdapter,
     captureFrame: SafariCameraAdapter.captureFrame,
-    mostrarPantallaRecorte,
   };
 }
+
+export {
+  switchScreen,
+  UsageTracker,
+  GeometryEngine,
+  FeedbackService,
+  DocumentShareService,
+  SafariCameraAdapter,
+};

@@ -81,7 +81,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-[#0a0f18] flex flex-col select-none touch-none app-viewport"
+      className="w-full h-full bg-[#0a0f18] flex flex-col select-none touch-none app-viewport"
       style={{ height: '100dvh', minHeight: '-webkit-fill-available' }}
     >
       {/* BARRA SUPERIOR */}

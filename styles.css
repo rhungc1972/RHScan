@@ -1,4 +1,8 @@
-/* styles.css - RHDocScan Modern Dark UI & Mobile Ergonomics */
+/* styles.css - RHDocScan v2.0.0 FSM Architecture
+ * Mobile Web (PWA), iOS Safari (WebKit) & Android Ergonomics
+ * Arquitectura estricta de MÁQUINA DE ESTADOS FINITOS (FSM)
+ * Resuelve al 100% el solapamiento visual entre Cámara, Recorte, Galería y Éxito.
+ */
 
 :root {
   --sat: env(safe-area-inset-top, 0px);
@@ -34,8 +38,81 @@ html, body, #root, .app-container {
   touch-action: manipulation;
 }
 
-/* Reglas obligatorias para la barra de captura inferior en iOS (Safari) y Android */
-.camera-controls-container, .bottom-bar {
+/* ==========================================================================
+   1. MÁQUINA DE ESTADOS FINITOS (FSM) - PANTALLAS MUTUAMENTE EXCLUYENTES
+   Garantiza que nunca se solapen capas de Cámara, Recorte, Galería o Éxito.
+   ========================================================================== */
+
+#screen-camera,
+#screen-crop,
+#screen-gallery,
+#screen-success,
+.screen-state {
+  width: 100% !important;
+  height: 100% !important;
+  height: 100dvh !important;
+  height: -webkit-fill-available !important;
+  min-height: -webkit-fill-available !important;
+  position: fixed !important;
+  inset: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+/* Ocultamiento obligatorio y estricto */
+.screen-hidden,
+#screen-camera.screen-hidden,
+#screen-crop.screen-hidden,
+#screen-gallery.screen-hidden,
+#screen-success.screen-hidden {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: -1 !important;
+}
+
+/* Visibilidad de pantalla activa */
+.screen-active,
+#screen-camera.screen-active,
+#screen-crop.screen-active,
+#screen-gallery.screen-active,
+#screen-success.screen-active {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* Jerarquía de capas (Z-Index) */
+#screen-camera {
+  z-index: 10;
+}
+
+#screen-crop {
+  z-index: 50;
+  background-color: #0a0f18;
+}
+
+#screen-gallery {
+  z-index: 60;
+  background-color: #0a0f18;
+}
+
+#screen-success {
+  z-index: 70;
+  background-color: #0a0f18;
+}
+
+/* ==========================================================================
+   2. REGLAS OBLIGATORIAS PARA CONTROLES DE CÁMARA (AISLAMIENTO EN iOS)
+   Los controles inferiores de la cámara SÓLO existen en ESTADO_CAMARA.
+   ========================================================================== */
+
+#screen-camera .camera-controls-container,
+#screen-camera .bottom-bar,
+body[data-screen="screen-camera"] .camera-controls-container,
+body[data-screen="screen-camera"] .bottom-bar {
   position: fixed !important;
   bottom: calc(25px + env(safe-area-inset-bottom, 0px)) !important;
   left: 0 !important;
@@ -51,6 +128,31 @@ html, body, #root, .app-container {
   pointer-events: auto !important;
 }
 
+/* En Recorte, Galería o Éxito: SUPRESIÓN TOTAL de la barra y del obturador */
+body[data-screen="screen-crop"] .camera-controls-container,
+body[data-screen="screen-crop"] .bottom-bar,
+body[data-screen="screen-crop"] .shutter-button,
+body[data-screen="screen-gallery"] .camera-controls-container,
+body[data-screen="screen-gallery"] .bottom-bar,
+body[data-screen="screen-gallery"] .shutter-button,
+body[data-screen="screen-success"] .camera-controls-container,
+body[data-screen="screen-success"] .bottom-bar,
+body[data-screen="screen-success"] .shutter-button {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* El elemento de video no debe capturar eventos que bloqueen botones */
+video, .camera-video {
+  pointer-events: none !important;
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
+}
+
+/* Botón obturador táctil blanco con relieve en iOS Safari */
 .shutter-button {
   width: 76px !important;
   height: 76px !important;
@@ -65,9 +167,17 @@ html, body, #root, .app-container {
   justify-content: center !important;
   pointer-events: auto !important;
   touch-action: manipulation !important;
+  transition: transform 0.12s ease;
 }
 
-/* Clases ergonómicas para áreas seguras móviles */
+.shutter-button:active {
+  transform: scale(0.92) !important;
+}
+
+/* ==========================================================================
+   3. ÁREAS SEGURAS MÓVILES (NOTCH / HOME INDICATOR)
+   ========================================================================== */
+
 .pt-safe {
   padding-top: max(12px, env(safe-area-inset-top, 12px));
 }
@@ -81,7 +191,7 @@ html, body, #root, .app-container {
   padding-right: max(16px, env(safe-area-inset-right, 16px));
 }
 
-/* Glassmorphism sutil y fondos */
+/* Paneles translúcidos */
 .glass-panel {
   background: var(--panel-bg);
   backdrop-filter: blur(16px);
@@ -96,7 +206,6 @@ html, body, #root, .app-container {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
-/* Tipografía de números técnicos */
 .font-mono-numbers {
   font-family: 'JetBrains Mono', monospace;
 }
@@ -130,17 +239,4 @@ html, body, #root, .app-container {
 .folio-cutout.stable {
   border: 2.5px solid #10b981;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45), 0 0 25px rgba(16, 185, 129, 0.35);
-}
-
-/* Botón obturador táctil grande */
-.shutter-btn {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  transition: transform 0.15s ease, box-shadow 0.2s ease;
-  cursor: pointer;
-}
-
-.shutter-btn:active {
-  transform: scale(0.92);
 }

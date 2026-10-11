@@ -45,8 +45,70 @@ html, body, #root {
   -webkit-touch-callout: none;
 }
 
-/* Reglas obligatorias para la barra de captura inferior en iOS (Safari) y Android */
-.camera-controls-container, .bottom-bar {
+/* MÁQUINA DE ESTADOS FINITOS (FSM) - PANTALLAS MUTUAMENTE EXCLUYENTES */
+#screen-camera,
+#screen-crop,
+#screen-gallery,
+#screen-success,
+.screen-state {
+  width: 100% !important;
+  height: 100% !important;
+  height: 100dvh !important;
+  height: -webkit-fill-available !important;
+  min-height: -webkit-fill-available !important;
+  position: fixed !important;
+  inset: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+.screen-hidden,
+#screen-camera.screen-hidden,
+#screen-crop.screen-hidden,
+#screen-gallery.screen-hidden,
+#screen-success.screen-hidden {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: -1 !important;
+}
+
+.screen-active,
+#screen-camera.screen-active,
+#screen-crop.screen-active,
+#screen-gallery.screen-active,
+#screen-success.screen-active {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+#screen-camera {
+  z-index: 10;
+}
+
+#screen-crop {
+  z-index: 50;
+  background-color: #0a0f18;
+}
+
+#screen-gallery {
+  z-index: 60;
+  background-color: #0a0f18;
+}
+
+#screen-success {
+  z-index: 70;
+  background-color: #0a0f18;
+}
+
+/* Reglas para la barra de captura inferior: SOLO activa en ESTADO_CAMARA */
+#screen-camera .camera-controls-container,
+#screen-camera .bottom-bar,
+body[data-screen="screen-camera"] .camera-controls-container,
+body[data-screen="screen-camera"] .bottom-bar {
   position: fixed !important;
   bottom: calc(25px + env(safe-area-inset-bottom, 0px)) !important;
   left: 0 !important;
@@ -59,6 +121,23 @@ html, body, #root {
   z-index: 999999 !important;
   transform: translateZ(0) !important;
   -webkit-transform: translateZ(0) !important;
+  pointer-events: auto !important;
+}
+
+/* Ocultamiento absoluto de controles de cámara en Recorte, Galería y Éxito */
+body[data-screen="screen-crop"] .camera-controls-container,
+body[data-screen="screen-crop"] .bottom-bar,
+body[data-screen="screen-crop"] .shutter-button,
+body[data-screen="screen-gallery"] .camera-controls-container,
+body[data-screen="screen-gallery"] .bottom-bar,
+body[data-screen="screen-gallery"] .shutter-button,
+body[data-screen="screen-success"] .camera-controls-container,
+body[data-screen="screen-success"] .bottom-bar,
+body[data-screen="screen-success"] .shutter-button {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 /* Contenedor de viewport dinámico para evitar cortes en Safari */
