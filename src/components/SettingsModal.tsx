@@ -18,6 +18,7 @@ import {
   KeyRound,
   Store,
   CheckCircle2,
+  MessageSquare,
 } from 'lucide-react';
 import { ScanFilter, ScanTrackerState } from '../types';
 import { getQuotaInfo, ANONYMOUS_DAILY_LIMIT, REGISTERED_DAILY_LIMIT } from '../services/usageTracker';
@@ -31,6 +32,7 @@ interface SettingsModalProps {
   trackerState: ScanTrackerState;
   onOpenRegistration: () => void;
   onOpenAdmin?: () => void;
+  onOpenFeedback?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -40,6 +42,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   trackerState,
   onOpenRegistration,
   onOpenAdmin,
+  onOpenFeedback,
 }) => {
   const quota = getQuotaInfo(trackerState);
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
@@ -248,6 +251,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </p>
           )}
         </div>
+
+        {/* SECCIÓN OBSERVACIONES Y SUGERENCIAS */}
+        {onOpenFeedback && (
+          <div className="mb-5 p-3 rounded-2xl bg-gradient-to-r from-emerald-950/40 to-cyan-950/40 border border-emerald-500/30 space-y-2">
+            <button
+              onClick={() => {
+                onClose();
+                onOpenFeedback();
+              }}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-slate-950 font-bold text-xs tracking-wide transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-98"
+            >
+              <MessageSquare className="w-4 h-4 text-slate-950" />
+              <span>💬 Observaciones y Sugerencias</span>
+            </button>
+            <p className="text-[10px] text-center text-slate-400">
+              Tu opinión nos ayuda a perfeccionar RHDocScan para toda la comunidad.
+            </p>
+          </div>
+        )}
 
         {/* PRINCIPIOS ZERO-KNOWLEDGE */}
         <div className="p-3.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/20 space-y-1.5">

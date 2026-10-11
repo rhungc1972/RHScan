@@ -48,6 +48,23 @@ html, body, #root, .app-container {
   z-index: 999999 !important;
   transform: translateZ(0) !important;
   -webkit-transform: translateZ(0) !important;
+  pointer-events: auto !important;
+}
+
+.shutter-button {
+  width: 76px !important;
+  height: 76px !important;
+  border-radius: 50% !important;
+  background-color: #ffffff !important;
+  border: 5px solid rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6) !important;
+  cursor: pointer !important;
+  -webkit-tap-highlight-color: transparent !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
 }
 
 /* Clases ergonómicas para áreas seguras móviles */

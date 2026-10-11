@@ -434,16 +434,117 @@ class SafariCameraAdapter {
 
     return stream;
   }
+
+  /**
+   * Captura robusta directa por Canvas para WebKit / iOS Safari
+   * Evita APIs incompatibles como ImageCapture.takePhoto() y bucles congelados
+   */
+  static async captureFrame(video, detectionAnimationId, onRecorteCallback) {
+    try {
+      if (!video || video.readyState < 2) {
+        console.warn("Video aún no listo");
+        return null;
+      }
+      // Crear canvas temporal con la resolución nativa del sensor
+      const captureCanvas = document.createElement('canvas');
+      captureCanvas.width = video.videoWidth || 1920;
+      captureCanvas.height = video.videoHeight || 1080;
+      const ctx = captureCanvas.getContext('2d');
+      if (!ctx) {
+        throw new Error("No se pudo obtener contexto 2D para la captura.");
+      }
+      ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+      
+      // Guardar la imagen capturada en memoria
+      const capturedImageData = captureCanvas.toDataURL('image/jpeg', 0.95);
+      
+      // Detener temporalmente el loop de auto-detección
+      if (detectionAnimationId) {
+        cancelAnimationFrame(detectionAnimationId);
+      }
+      
+      // Pasar a la pantalla de recorte y ajuste fino
+      if (typeof onRecorteCallback === 'function') {
+        onRecorteCallback(capturedImageData);
+      } else if (typeof window.mostrarPantallaRecorte === 'function') {
+        window.mostrarPantallaRecorte(capturedImageData);
+      }
+      return capturedImageData;
+    } catch (err) {
+      console.error("Error al capturar en iOS:", err);
+      alert("Error al capturar imagen: " + err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Auto-ajuste automático del marco verde al capturar
+   * Si la visión artificial detectó 4 esquinas las toma directamente;
+   * de lo contrario, aplica los 4 vértices del marco Folio/Oficio como fallback inicial.
+   */
+  static getAutoAdjustedCorners(detectedCorners, viewportWidth, viewportHeight, sensorWidth, sensorHeight) {
+    if (detectedCorners && Array.isArray(detectedCorners) && detectedCorners.length === 4) {
+      return detectedCorners;
+    }
+    // Fallback: Marco tamaño Folio/Oficio (proporción 1:1.45)
+    const folioAspect = 1.45;
+    const marginRatio = 0.84;
+    let frameW = (viewportWidth || 360) * marginRatio;
+    let frameH = frameW * folioAspect;
+    const maxAvailableH = (viewportHeight || 640) * 0.74;
+    if (frameH > maxAvailableH) {
+      frameH = maxAvailableH;
+      frameW = frameH / folioAspect;
+    }
+    const startX = ((viewportWidth || 360) - frameW) / 2;
+    const startY = ((viewportHeight || 640) - frameH) / 2 - 12;
+
+    const screenQuad = [
+      { x: startX, y: startY },
+      { x: startX + frameW, y: startY },
+      { x: startX + frameW, y: startY + frameH },
+      { x: startX, y: startY + frameH },
+    ];
+
+    return screenQuad.map(pt => GeometryEngine.screenToSensor(
+      pt.x, pt.y, viewportWidth, viewportHeight, sensorWidth || 1920, sensorHeight || 1080
+    ));
+  }
+}
+
+/**
+ * Transición de pantalla a recorte y ajuste fino en el DOM
+ */
+function mostrarPantallaRecorte(imgData) {
+  const cameraScreen = document.querySelector('.camera-screen, .camera-view, #camera-container');
+  if (cameraScreen) {
+    cameraScreen.style.display = 'none';
+  }
+  const cropScreen = document.querySelector('.crop-screen, .perspective-editor, #crop-container');
+  if (cropScreen) {
+    cropScreen.style.display = 'flex';
+    cropScreen.style.position = 'fixed';
+    cropScreen.style.inset = '0';
+    cropScreen.style.zIndex = '100000';
+  }
+  const previewImg = document.querySelector('#captured-preview-img, .captured-preview');
+  if (previewImg && imgData) {
+    previewImg.src = imgData;
+  }
 }
 
 // Inicialización automática de adaptaciones
 if (typeof window !== 'undefined') {
   SafariCameraAdapter.initViewportFix();
+  window.captureFrame = SafariCameraAdapter.captureFrame;
+  window.mostrarPantallaRecorte = mostrarPantallaRecorte;
   window.RHDocScan = {
     UsageTracker,
     GeometryEngine,
     FeedbackService,
     DocumentShareService,
     SafariCameraAdapter,
+    captureFrame: SafariCameraAdapter.captureFrame,
+    mostrarPantallaRecorte,
   };
 }

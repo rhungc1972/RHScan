@@ -244,8 +244,14 @@ export const CameraView: React.FC<CameraViewProps> = ({
             setStatusMessage(analysis.statusMessage);
             setIsProperlyLit(analysis.isProperlyLit);
 
-            // Si no hay contorno de alto contraste detectado, usar el marco Folio por defecto
-            currentQuadRef.current = folio.sensorQuad;
+            // Si la visión artificial detectó 4 esquinas/bordes con contraste suficiente,
+            // posicionar los 4 puntos de anclaje verdes automáticamente sobre el documento.
+            // Si no detectó contorno claro, usar el marco Folio/Oficio como fallback inicial.
+            if (analysis.isDocumentDetected && analysis.quad) {
+              currentQuadRef.current = analysis.quad;
+            } else {
+              currentQuadRef.current = folio.sensorQuad;
+            }
 
             if (analysis.isStable && !prevStableStateRef.current) {
               playFocusLockTone();
@@ -687,8 +693,16 @@ export const CameraView: React.FC<CameraViewProps> = ({
 
             <button
               disabled={isQuotaExceeded || pages.length >= maxPages}
-              onClick={triggerCapture}
-              className={`w-18 h-18 rounded-full flex items-center justify-center p-1.5 transition active:scale-90 ${
+              onClick={(e) => {
+                e.preventDefault();
+                triggerCapture();
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                triggerCapture();
+              }}
+              style={{ pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
+              className={`shutter-button w-18 h-18 rounded-full flex items-center justify-center p-1.5 transition active:scale-90 ${
                 isQuotaExceeded || pages.length >= maxPages
                   ? 'bg-slate-800/80 border-2 border-slate-700 cursor-not-allowed opacity-60'
                   : isStable

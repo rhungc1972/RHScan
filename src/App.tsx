@@ -278,6 +278,10 @@ export default function App() {
           onChangeFilter={setPreferredFilter}
           trackerState={trackerState}
           onOpenRegistration={() => setIsRegistrationOpen(true)}
+          onOpenFeedback={() => {
+            setIsSettingsOpen(false);
+            setIsFeedbackOpen(true);
+          }}
           onOpenAdmin={() => {
             setIsSettingsOpen(false);
             setIsAdminOpen(true);

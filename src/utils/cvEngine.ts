@@ -452,7 +452,7 @@ export class DocumentDetector {
     }
 
     // 1. Detección de bordes y estimación del marco
-    const rawDetectedQuad = this.detectContourQuad(videoElement);
+    const { quad: rawDetectedQuad, hasContour } = this.detectContourQuad(videoElement);
 
     // 2. Filtro de paso bajo / Suavizado Exponencial (EMA) para eliminar temblores
     if (!this.smoothedQuad) {
@@ -530,7 +530,7 @@ export class DocumentDetector {
 
     return {
       quad: this.smoothedQuad,
-      isDocumentDetected: true,
+      isDocumentDetected: hasContour,
       isStable,
       stabilityProgress: progress,
       isProperlyLit: lightCheck.isProperlyLit,
@@ -593,7 +593,7 @@ export class DocumentDetector {
   /**
    * Detección de contornos con gradientes en cuadrícula de muestreo
    */
-  private detectContourQuad(video: HTMLVideoElement): Quad {
+  private detectContourQuad(video: HTMLVideoElement): { quad: Quad; hasContour: boolean } {
     try {
       const sw = 160;
       const sh = 220;
@@ -601,7 +601,7 @@ export class DocumentDetector {
       canvas.width = sw;
       canvas.height = sh;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return this.getDefaultQuad();
+      if (!ctx) return { quad: this.getDefaultQuad(), hasContour: false };
 
       ctx.drawImage(video, 0, 0, sw, sh);
       const imgData = ctx.getImageData(0, 0, sw, sh);
@@ -621,64 +621,72 @@ export class DocumentDetector {
       const centerY = Math.floor(sh / 2);
 
       // Búsqueda vertical
-      for (let y = Math.floor(sh * 0.1); y < centerY; y++) {
+      for (let y = Math.floor(sh * 0.08); y < centerY; y++) {
         const idx1 = (y * sw + centerX) * 4;
         const idx2 = ((y + 2) * sw + centerX) * 4;
         const diff = Math.abs(data[idx1] - data[idx2]) + Math.abs(data[idx1 + 1] - data[idx2 + 1]);
-        if (diff > 55) {
+        if (diff > 50) {
           topY = y;
           break;
         }
       }
 
-      for (let y = Math.floor(sh * 0.9); y > centerY; y--) {
+      for (let y = Math.floor(sh * 0.92); y > centerY; y--) {
         const idx1 = (y * sw + centerX) * 4;
         const idx2 = ((y - 2) * sw + centerX) * 4;
         const diff = Math.abs(data[idx1] - data[idx2]) + Math.abs(data[idx1 + 1] - data[idx2 + 1]);
-        if (diff > 55) {
+        if (diff > 50) {
           bottomY = y;
           break;
         }
       }
 
       // Búsqueda horizontal
-      for (let x = Math.floor(sw * 0.1); x < centerX; x++) {
+      for (let x = Math.floor(sw * 0.08); x < centerX; x++) {
         const idx1 = (centerY * sw + x) * 4;
         const idx2 = (centerY * sw + x + 2) * 4;
         const diff = Math.abs(data[idx1] - data[idx2]) + Math.abs(data[idx1 + 1] - data[idx2 + 1]);
-        if (diff > 55) {
+        if (diff > 50) {
           leftX = x;
           break;
         }
       }
 
-      for (let x = Math.floor(sw * 0.9); x > centerX; x--) {
+      for (let x = Math.floor(sw * 0.92); x > centerX; x--) {
         const idx1 = (centerY * sw + x) * 4;
         const idx2 = (centerY * sw + x - 2) * 4;
         const diff = Math.abs(data[idx1] - data[idx2]) + Math.abs(data[idx1 + 1] - data[idx2 + 1]);
-        if (diff > 55) {
+        if (diff > 50) {
           rightX = x;
           break;
         }
       }
 
-      if (topY > 0 && bottomY > topY && (bottomY - topY) > sh * 0.35) {
+      let detectedEdgesCount = 0;
+      if (topY > 0 && bottomY > topY && (bottomY - topY) > sh * 0.30) {
         minY = topY;
         maxY = bottomY;
+        detectedEdgesCount += 2;
       }
-      if (leftX > 0 && rightX > leftX && (rightX - leftX) > sw * 0.35) {
+      if (leftX > 0 && rightX > leftX && (rightX - leftX) > sw * 0.30) {
         minX = leftX;
         maxX = rightX;
+        detectedEdgesCount += 2;
       }
 
-      return [
-        { x: minX / sw, y: minY / sh },
-        { x: maxX / sw, y: minY / sh },
-        { x: maxX / sw, y: maxY / sh },
-        { x: minX / sw, y: maxY / sh },
-      ];
+      const hasContour = detectedEdgesCount >= 2;
+
+      return {
+        quad: [
+          { x: minX / sw, y: minY / sh },
+          { x: maxX / sw, y: minY / sh },
+          { x: maxX / sw, y: maxY / sh },
+          { x: minX / sw, y: maxY / sh },
+        ],
+        hasContour,
+      };
     } catch (e) {
-      return this.getDefaultQuad();
+      return { quad: this.getDefaultQuad(), hasContour: false };
     }
   }
 }
