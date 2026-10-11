@@ -1,10 +1,18 @@
 /**
  * app.js - RHDocScan (Zero-Knowledge Client-Side Document Scanner)
- * Módulos: Cámara & Linterna, Máscara Folio/Oficio, Homografía Proyectiva (Warp Perspective),
- * Gestión de Límites con Cuenta Regresiva a Medianoche, Generación de PDF y Web Share API Nivel 2.
+ * Arquitectura 100% Client-Side lista para producción y Netlify.
+ * Optimizado para iOS Safari (iPhone), Android y PWA:
+ * - Corrección de altura 100dvh / -webkit-fill-available
+ * - Barra inferior de controles fijada en calc(25px + env(safe-area-inset-bottom)) con aceleración 3D translateZ(0)
+ * - Compatibilidad de cámara con playsinline, webkit-playsinline y restricciones resilientes
+ * - Homografía proyectiva (warp perspective) con interpolación bilineal
+ * - Web Share API Nivel 2 y fallback de descarga
+ * - Módulo de Observaciones y Sugerencias ('rhdocscan_feedback') con descarga CSV (BOM UTF-8)
+ * - Registro simplificado por correo electrónico
+ * - Compartir aplicación y aviso de disponibilidad en tiendas
  */
 
-// 1. CONFIGURACIÓN Y CONSTANTES
+// 1. CONSTANTES Y CONFIGURACIÓN
 const DAILY_LIMITS = {
   ANONYMOUS: 3,
   REGISTERED: 10,
@@ -12,6 +20,7 @@ const DAILY_LIMITS = {
 };
 
 const STORAGE_KEY = 'scan_tracker';
+const FEEDBACK_STORAGE_KEY = 'rhdocscan_feedback';
 
 // 2. MÓDULO DE PERSISTENCIA Y LÍMITES LOCALES
 class UsageTracker {
@@ -32,7 +41,6 @@ class UsageTracker {
             count: 0,
             isRegistered: Boolean(parsed.isRegistered),
             userEmail: parsed.userEmail || '',
-            userName: parsed.userName || '',
           };
           this.saveState(reset);
           return reset;
@@ -48,7 +56,6 @@ class UsageTracker {
       count: 0,
       isRegistered: false,
       userEmail: '',
-      userName: '',
     };
     this.saveState(defaultState);
     return defaultState;
@@ -69,11 +76,10 @@ class UsageTracker {
     return s;
   }
 
-  static register(name, email) {
+  static registerEmailOnly(email) {
     const s = this.getState();
     s.isRegistered = true;
-    s.userName = name;
-    s.userEmail = email;
+    s.userEmail = email.trim();
     this.saveState(s);
     return s;
   }
@@ -96,10 +102,10 @@ class UsageTracker {
   }
 }
 
-// 3. MÓDULO MATEMÁTICO: HOMOGRAFÍA PROYECTIVA Y CONVERSIÓN DE COORDENADAS
+// 3. MÓDULO MATEMÁTICO: HOMOGRAFÍA PROYECTIVA Y RECORTE
 class GeometryEngine {
   /**
-   * Resuelve la matriz de homografía 3x3 para transformar 4 puntos cuadrangulares a un rectángulo plano
+   * Resuelve el sistema lineal 8x8 para obtener la matriz de homografía 3x3 normalizada
    */
   static getProjectiveTransform(src, dst) {
     const A = [];
@@ -148,9 +154,12 @@ class GeometryEngine {
   }
 
   /**
-   * Mapea un punto en pantalla (CSS pixels con object-fit: cover) a píxeles nativos del sensor de cámara
+   * Mapea coordenadas visuales en pantalla a coordenadas del sensor de cámara
    */
   static screenToSensor(screenX, screenY, viewportW, viewportH, sensorW, sensorH) {
+    if (!sensorW || !sensorH || !viewportW || !viewportH) {
+      return { x: screenX, y: screenY };
+    }
     const scale = Math.max(viewportW / sensorW, viewportH / sensorH);
     const renderedW = sensorW * scale;
     const renderedH = sensorH * scale;
@@ -166,7 +175,7 @@ class GeometryEngine {
   }
 
   /**
-   * Endereza la perspectiva de la imagen fuente dada una selección de 4 puntos
+   * Endereza la perspectiva de la imagen con interpolación bilineal
    */
   static async warpPerspective(sourceImage, corners, outputW = 1000, outputH = 1450) {
     const sw = sourceImage.naturalWidth || sourceImage.width;
@@ -207,13 +216,16 @@ class GeometryEngine {
 
         const x0 = Math.floor(sx);
         const y0 = Math.floor(sy);
+        const x1 = Math.min(sw - 1, x0 + 1);
+        const y1 = Math.min(sh - 1, y0 + 1);
+
         const fx = sx - x0;
         const fy = sy - y0;
 
         const i00 = (y0 * sw + x0) * 4;
-        const i10 = (y0 * sw + Math.min(sw - 1, x0 + 1)) * 4;
-        const i01 = (Math.min(sh - 1, y0 + 1) * sw + x0) * 4;
-        const i11 = (Math.min(sh - 1, y0 + 1) * sw + Math.min(sw - 1, x0 + 1)) * 4;
+        const i10 = (y0 * sw + x1) * 4;
+        const i01 = (y1 * sw + x0) * 4;
+        const i11 = (y1 * sw + x1) * 4;
 
         for (let c = 0; c < 3; c++) {
           dstData[dstIdx + c] = Math.round(
@@ -233,7 +245,80 @@ class GeometryEngine {
   }
 }
 
-// 4. MÓDULO DE COMPILACIÓN PDF Y WEB SHARE API (NIVEL 2)
+// 4. MÓDULO DE GESTIÓN DE OBSERVACIONES Y SUGERENCIAS
+class FeedbackService {
+  static getFeedbackList() {
+    try {
+      const raw = localStorage.getItem(FEEDBACK_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.warn('Error leyendo sugerencias de localStorage:', e);
+      return [];
+    }
+  }
+
+  static saveFeedback(rawName, message) {
+    const cleanName = (rawName && rawName.trim()) ? rawName.trim() : 'Anónimo';
+    const record = {
+      id: `fb_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: cleanName,
+      message: (message || '').trim(),
+      timestamp: new Date().toISOString(),
+    };
+
+    const list = this.getFeedbackList();
+    list.unshift(record);
+
+    try {
+      localStorage.setItem(FEEDBACK_STORAGE_KEY, JSON.stringify(list));
+    } catch (e) {
+      console.error('Error guardando sugerencia:', e);
+    }
+    return record;
+  }
+
+  static downloadFeedbackCsv() {
+    const list = this.getFeedbackList();
+    if (list.length === 0) {
+      alert('No hay sugerencias registradas para descargar.');
+      return;
+    }
+
+    const escapeCsv = (str) => {
+      const escaped = (str || '').replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
+
+    const header = ['ID', 'Fecha y Hora (Local)', 'Fecha (ISO)', 'Nombre', 'Mensaje/Sugerencia'];
+    const rows = list.map((item) => {
+      const localDate = new Date(item.timestamp).toLocaleString();
+      return [
+        escapeCsv(item.id),
+        escapeCsv(localDate),
+        escapeCsv(item.timestamp),
+        escapeCsv(item.name),
+        escapeCsv(item.message),
+      ].join(',');
+    });
+
+    // Prefijo BOM UTF-8 (\uFEFF) para visualización correcta en Excel/Numbers
+    const csvContent = '\uFEFF' + [header.join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', 'sugerencias_rhdocscan.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+}
+
+// 5. MÓDULO DE DESPACHO Y WEB SHARE API
 class DocumentShareService {
   static async sharePdf(pdfBlob, filename = 'RHDocScan_Documento.pdf') {
     const file = new File([pdfBlob], filename, { type: 'application/pdf' });
@@ -262,11 +347,103 @@ class DocumentShareService {
     setTimeout(() => URL.revokeObjectURL(url), 2000);
     return { shared: false, downloaded: true };
   }
+
+  static async shareApp(onToast) {
+    const shareData = {
+      title: 'RHDocScan - Escáner Móvil Seguro',
+      text: 'Escanea documentos en PDF con calidad profesional, 100% privado y sin servidores.',
+      url: window.location.href,
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (e) {
+        if (e.name === 'AbortError') return;
+      }
+    }
+
+    // Fallback: copiar al portapapeles
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(window.location.href);
+      }
+      if (typeof onToast === 'function') {
+        onToast('¡Enlace copiado al portapapeles!');
+      } else {
+        alert('¡Enlace copiado al portapapeles!');
+      }
+    } catch (clipErr) {
+      console.warn('Error al copiar portapapeles:', clipErr);
+    }
+  }
+
+  static getAppStoreToastMessage() {
+    return '📱 RHDocScan estará disponible muy pronto en Google Play Store y Apple App Store. ¡Por ahora puedes usarla directamente desde la web!';
+  }
 }
 
-// Exportación global
-window.RHDocScan = {
-  UsageTracker,
-  GeometryEngine,
-  DocumentShareService,
-};
+// 6. CONTROLADOR DE CÁMARA Y ADAPTACIONES PARA SAFARI iOS
+class SafariCameraAdapter {
+  static initViewportFix() {
+    const setViewportHeight = () => {
+      const vh = window.innerHeight;
+      document.documentElement.style.setProperty('--app-height', `${vh}px`);
+    };
+    window.addEventListener('resize', setViewportHeight);
+    window.addEventListener('orientationchange', setViewportHeight);
+    setViewportHeight();
+  }
+
+  static async startCameraStream(videoElement, facingMode = 'environment') {
+    if (!videoElement) return null;
+
+    // Asegurar atributos requeridos por WebKit / iOS Safari
+    videoElement.setAttribute('autoplay', '');
+    videoElement.setAttribute('playsinline', '');
+    videoElement.setAttribute('webkit-playsinline', '');
+    videoElement.muted = true;
+
+    const idealConstraints = {
+      audio: false,
+      video: {
+        facingMode: { ideal: facingMode },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+    };
+
+    let stream = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(idealConstraints);
+    } catch (e) {
+      console.warn('Fallo getUserMedia con resolución ideal, intentando fallback iOS:', e);
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: { ideal: facingMode } },
+      });
+    }
+
+    videoElement.srcObject = stream;
+    try {
+      await videoElement.play();
+    } catch (playErr) {
+      console.warn('AutoPlay bloqueado hasta interacción:', playErr);
+    }
+
+    return stream;
+  }
+}
+
+// Inicialización automática de adaptaciones
+if (typeof window !== 'undefined') {
+  SafariCameraAdapter.initViewportFix();
+  window.RHDocScan = {
+    UsageTracker,
+    GeometryEngine,
+    FeedbackService,
+    DocumentShareService,
+    SafariCameraAdapter,
+  };
+}

@@ -201,7 +201,13 @@ export default function App() {
   }, []);
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#0a0f18] text-white">
+    <div
+      className="relative w-full overflow-hidden bg-[#0a0f18] text-white app-viewport"
+      style={{
+        height: '100dvh',
+        minHeight: '-webkit-fill-available',
+      }}
+    >
       {/* VISTA PRINCIPAL DE CÁMARA */}
       <CameraView
         onCaptureFrame={handleCaptureFrame}

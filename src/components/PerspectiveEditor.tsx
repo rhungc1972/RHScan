@@ -110,6 +110,7 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
   };
 
   const handleTouchStart = (index: number, e: React.TouchEvent) => {
+    e.preventDefault();
     setActiveHandleIndex(index);
     triggerHaptic(25);
     updateLoupe(index);
@@ -138,6 +139,7 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (activeHandleIndex === null || !containerRef.current) return;
+    e.preventDefault();
     const touch = e.touches[0];
     if (!touch) return;
 
@@ -294,7 +296,10 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#0a0f18] flex flex-col select-none touch-none">
+    <div
+      className="fixed inset-0 z-50 bg-[#0a0f18] flex flex-col select-none touch-none app-viewport"
+      style={{ height: '100dvh', minHeight: '-webkit-fill-available' }}
+    >
       {/* BARRA SUPERIOR */}
       <div className="pt-safe px-safe py-3 flex items-center justify-between border-b border-white/10 glass-panel z-20">
         <button

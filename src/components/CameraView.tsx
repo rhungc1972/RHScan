@@ -91,15 +91,29 @@ export const CameraView: React.FC<CameraViewProps> = ({
         audio: false,
         video: {
           facingMode: { ideal: facingMode },
-          width: { ideal: 1920, min: 1280 },
-          height: { ideal: 1080, min: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
       };
 
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      let newStream: MediaStream;
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (err) {
+        console.warn('Fallback a restricciones de cámara básicas en iOS Safari:', err);
+        newStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: { ideal: facingMode },
+          },
+        });
+      }
       setStream(newStream);
 
       if (videoRef.current) {
+        videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        videoRef.current.muted = true;
         videoRef.current.srcObject = newStream;
         videoRef.current.play().catch(() => {});
       }
@@ -422,7 +436,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
   };
 
   return (
-    <div className="relative w-full h-full bg-black overflow-hidden select-none touch-none">
+    <div
+      className="relative w-full h-full app-viewport bg-black overflow-hidden select-none touch-none"
+      style={{ height: '100dvh', minHeight: '-webkit-fill-available' }}
+    >
       {/* Video de Cámara en Pantalla Completa */}
       <video
         ref={videoRef}
@@ -430,6 +447,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
         playsInline
         muted
         className="absolute inset-0 w-full h-full object-cover z-0"
+        style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
       />
 
       {/* Canvas HUD con Marco Folio / Oficio en tiempo real */}
@@ -563,10 +581,23 @@ export const CameraView: React.FC<CameraViewProps> = ({
         </div>
       )}
 
-      {/* BARRA INFERIOR DE CONTROLES ELEVADA */}
+      {/* BARRA INFERIOR DE CONTROLES ELEVADA (FIJA Y VISIBLE EN iOS SAFARI / ANDROID) */}
       <div
-        style={{ bottom: 'calc(45px + env(safe-area-inset-bottom, 0px))' }}
-        className="absolute inset-x-0 z-20 px-safe flex flex-col items-center gap-1.5 pointer-events-none"
+        style={{
+          position: 'fixed',
+          bottom: 'calc(25px + env(safe-area-inset-bottom, 0px))',
+          left: 0,
+          right: 0,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 999999,
+          transform: 'translateZ(0)',
+          WebkitTransform: 'translateZ(0)',
+        }}
+        className="camera-controls-container bottom-bar px-safe gap-1.5 pointer-events-none"
       >
         {/* Selector de modo y contador con separación reducida */}
         <div className="flex items-center justify-between w-full max-w-sm px-4 pointer-events-auto">
