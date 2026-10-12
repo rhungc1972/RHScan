@@ -53,6 +53,12 @@ export interface DetectionResult {
   stabilityProgress: number; // 0 a 1
 }
 
+export interface AppearanceData {
+  selfieDataUrl: string;
+  signatureDataUrl: string;
+  grantorName?: string;
+}
+
 export interface DocumentMetadata {
   timestampLocal: string;
   timestampUtc: string;
@@ -68,6 +74,7 @@ export interface DocumentMetadata {
     accuracy: number;
     mapsUrl: string;
   };
+  appearanceData?: AppearanceData;
 }
 
 export interface Sha256AuditLogRecord {

@@ -585,13 +585,14 @@ export const CameraView: React.FC<CameraViewProps> = ({
             <RefreshCw className="w-5 h-5" />
           </button>
 
-          {/* Botón: Compartir App */}
+          {/* Botón: 🔗 Compartir RHDocScan (mínimo 44px de alto con padding 8px 16px) */}
           <button
             onClick={onShareApp}
-            className="p-2.5 rounded-full text-slate-300 hover:text-white glass-panel transition active:scale-95 flex items-center justify-center"
-            title="Compartir App"
+            className="btn-header-action glass-panel text-slate-200 hover:text-white border border-white/10 shadow-sm"
+            title="🔗 Compartir RHDocScan"
           >
-            <Share2 className="w-5 h-5 text-emerald-400" />
+            <Share2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span className="hidden sm:inline">🔗 Compartir</span>
           </button>
 
           {/* Botón de Ajustes (Engranaje) */}

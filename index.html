@@ -4,16 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>RHDocScan - Escáner Móvil Privado</title>
-    <meta name="description" content="RHDocScan: Escáner móvil PWA con arquitectura de máquina de estados finitos, marco Folio/Oficio, visión por computadora 100% local (Zero-Knowledge) y exportación directa a PDF." />
+    <meta name="description" content="RHDocScan: Escáner móvil PWA con marco Folio/Oficio, visión por computadora en vivo (60 FPS), auto-ajuste esmeralda, certificación criptográfica SHA-256 y acta de comparecencia digital 100% Zero-Knowledge." />
     
     <!-- Open Graph / Social -->
     <meta property="og:title" content="RHDocScan - Escáner Móvil Privado" />
-    <meta property="og:description" content="RHDocScan: Escáner móvil PWA con arquitectura FSM, marco Folio/Oficio y visión por computadora local." />
+    <meta property="og:description" content="RHDocScan: Escáner móvil PWA con marco Folio/Oficio y visión por computadora local." />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="/pwa-512x512.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="RHDocScan - Escáner Móvil Privado" />
-    <meta name="twitter:description" content="RHDocScan: Escáner móvil PWA con arquitectura FSM y procesamiento de visión por computadora 100% local." />
+    <meta name="twitter:description" content="RHDocScan: Escáner móvil PWA con arquitectura FSM y procesamiento 100% local." />
 
     <!-- PWA & Mobile Capabilities -->
     <meta name="theme-color" content="#0a0f18" />
@@ -31,11 +31,13 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    
     <!-- Global Styles & Safari Ergonomics -->
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body class="bg-[#0a0f18] text-slate-100 antialiased select-none overflow-hidden touch-none font-sans app-viewport" style="height: 100dvh; min-height: -webkit-fill-available;" data-screen="screen-camera">
-    <!-- Contenedor Raíz de la Aplicación (Soporta montaje React y semántica FSM nativa) -->
+    <!-- Contenedor Raíz de la Aplicación (Máquina de Estados Finitos) -->
     <div id="root" style="height: 100dvh; min-height: -webkit-fill-available;">
       <!-- ESTADO 1: CÁMARA (Activo por defecto) -->
       <div id="screen-camera" class="screen-state screen-active"></div>

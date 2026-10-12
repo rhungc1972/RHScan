@@ -1,6 +1,9 @@
 // src/components/DocumentReviewModal.tsx
-// Galería de Páginas Acumuladas, tarjeta "[+ 📷 Tomar otra página]",
-// botón "Guardar / Enviar", casilla de metadatos SHA-256 y botón "💬 Comentarios y Sugerencias".
+// Galería de Páginas Acumuladas con:
+// - Carrusel horizontal de tomas [Toma 1] [Toma 2]... y BOTÓN VERDE [+ 📷 Tomar otra página] ESTRICTAMENTE A LA DERECHA
+// - Botón flotante papelera roja (🗑️) con fondo circular para eliminar tomas individuales
+// - Doble casilla condicional: Casilla 1 (Hash SHA-256) y Casilla 2 (Comparecencia con foto frontal y firma táctil)
+// - Menú de Envío Multicanal: "📱 Compartir por WhatsApp", "✉️ Enviar por Correo Electrónico", "💾 Descargar en este Teléfono"
 
 import React, { useState } from 'react';
 import {
@@ -17,9 +20,14 @@ import {
   MessageSquare,
   Loader2,
   Lock,
+  Mail,
+  Send,
+  UserCheck,
+  FileText,
 } from 'lucide-react';
-import { ScannedPage, ExportFormat } from '../types';
+import { ScannedPage, ExportFormat, AppearanceData } from '../types';
 import { shareOrDownloadDocument } from '../utils/pdfGenerator';
+import { AppearanceModal } from './AppearanceModal';
 import { triggerHaptic } from '../utils/audioFeedback';
 
 interface DocumentReviewModalProps {
@@ -50,21 +58,61 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const [selectedPageIndex, setSelectedPageIndex] = useState<number>(0);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [currentFormat, setCurrentFormat] = useState<ExportFormat>(exportFormat || 'pdf');
+
+  // MÓDULO 4: DOBLE CASILLA CONDICIONAL (HASH Y FIRMA + SELFIE)
   const [includeMetadata, setIncludeMetadata] = useState<boolean>(false);
+  const [includeAppearance, setIncludeAppearance] = useState<boolean>(false);
+  const [appearanceData, setAppearanceData] = useState<AppearanceData | null>(null);
+  const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState<boolean>(false);
+
+  // Menú flotante de despacho multicanal
+  const [showDispatchMenu, setShowDispatchMenu] = useState<boolean>(false);
   const [postSendSuccess, setPostSendSuccess] = useState<boolean>(false);
   const [successInfo, setSuccessInfo] = useState<{ fileName: string; format: string } | null>(null);
 
   const activeFormat: ExportFormat = currentFormat || exportFormat || 'pdf';
   const activePage = pages[selectedPageIndex] || pages[0];
 
-  const handleExecuteSaveAndSend = async () => {
+  // Alternar Casilla 1 (Principal)
+  const handleToggleMetadata = (checked: boolean) => {
+    setIncludeMetadata(checked);
+    if (!checked) {
+      setIncludeAppearance(false);
+      setAppearanceData(null);
+    }
+  };
+
+  // Alternar Casilla 2 (Condicional)
+  const handleToggleAppearance = (checked: boolean) => {
+    setIncludeAppearance(checked);
+    if (checked && !appearanceData) {
+      setIsAppearanceModalOpen(true);
+    }
+  };
+
+  // Despacho del documento
+  const handleExecuteDispatch = async (channel: 'whatsapp' | 'email' | 'download') => {
     if (pages.length === 0 || isGenerating) return;
 
+    // Si Casilla 2 está marcada pero aún no se capturaron los datos de comparecencia, abrir modal primero
+    if (includeAppearance && !appearanceData) {
+      setIsAppearanceModalOpen(true);
+      return;
+    }
+
     setIsGenerating(true);
+    setShowDispatchMenu(false);
     triggerHaptic(40);
 
     try {
-      const result = await shareOrDownloadDocument(pages, activeFormat, includeMetadata);
+      const result = await shareOrDownloadDocument(
+        pages,
+        activeFormat,
+        includeMetadata,
+        includeAppearance && appearanceData ? appearanceData : undefined,
+        channel
+      );
+
       setSuccessInfo({
         fileName: result.fileName,
         format: (result.format || activeFormat).toUpperCase(),
@@ -84,11 +132,11 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
       className="w-full h-full bg-[#0a0f18] flex flex-col select-none touch-none app-viewport"
       style={{ height: '100dvh', minHeight: '-webkit-fill-available' }}
     >
-      {/* BARRA SUPERIOR */}
+      {/* BARRA SUPERIOR ERGONÓMICA */}
       <div className="pt-safe px-safe py-3 flex items-center justify-between border-b border-white/10 glass-panel z-20">
         <button
           onClick={onClose}
-          className="p-2 rounded-full text-slate-400 hover:text-white transition flex items-center gap-1 text-xs"
+          className="p-2 rounded-full text-slate-400 hover:text-white transition flex items-center gap-1.5 text-xs font-semibold"
         >
           <ArrowLeft className="w-5 h-5" />
           <span>Volver</span>
@@ -134,13 +182,23 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
           </div>
         </div>
 
-        <div className="w-10" />
+        {onOpenFeedback ? (
+          <button
+            onClick={onOpenFeedback}
+            className="p-2 rounded-full text-slate-400 hover:text-emerald-400 transition"
+            title="Sugerencias"
+          >
+            <MessageSquare className="w-5 h-5" />
+          </button>
+        ) : (
+          <div className="w-8" />
+        )}
       </div>
 
       {/* PANTALLA POST-ENVÍO CONFIRMADA */}
       {postSendSuccess && successInfo ? (
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 animate-scaleUp">
-          <div className="w-20 h-20 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shadow-xl shadow-emerald-500/20">
+          <div className="w-20 h-20 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shadow-xl shadow-emerald-500/20 border border-emerald-500/40">
             <CheckCircle className="w-12 h-12" />
           </div>
 
@@ -152,27 +210,33 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
           </div>
 
           {includeMetadata && (
-            <div className="p-3 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 max-w-xs text-left">
+            <div className="p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2.5 max-w-xs text-left">
               <ShieldCheck className="w-5 h-5 flex-shrink-0 text-emerald-400" />
-              <span>Acta de Certificación y Hash SHA-256 adjuntados con éxito.</span>
+              <span>
+                {includeAppearance
+                  ? 'Acta de Comparecencia, Firma Digital y Hash SHA-256 incorporados.'
+                  : 'Acta técnica de certificación y Hash SHA-256 adjuntados con éxito.'}
+              </span>
             </div>
           )}
 
           {/* Botón Prominente: Observaciones y Sugerencias */}
           <div className="w-full max-w-xs pt-4 space-y-3">
-            <button
-              onClick={onOpenFeedback}
-              className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-slate-950 font-bold text-sm tracking-wide transition shadow-lg shadow-emerald-500/25 active:scale-98 flex items-center justify-center gap-2"
-            >
-              <MessageSquare className="w-4 h-4" />
-              <span>💬 Observaciones y Sugerencias</span>
-            </button>
+            {onOpenFeedback && (
+              <button
+                onClick={onOpenFeedback}
+                className="btn-touch-primary w-full bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-slate-950 font-bold text-sm tracking-wide transition shadow-lg shadow-emerald-500/25 active:scale-98 flex items-center justify-center gap-2"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>💬 Observaciones y Sugerencias</span>
+              </button>
+            )}
 
             <button
               onClick={onClose}
-              className="w-full py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition"
+              className="btn-restart w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold transition"
             >
-              Nuevo Escaneo
+              + Iniciar Nuevo Escaneo
             </button>
           </div>
         </div>
@@ -180,13 +244,13 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
         /* VISTA DE REVISIÓN Y GALERÍA */
         <>
           {/* VISOR PRINCIPAL DE PÁGINA SELECCIONADA */}
-          <div className="flex-1 w-full relative overflow-hidden bg-black/60 flex items-center justify-center p-4">
+          <div className="flex-1 w-full relative overflow-hidden bg-black/70 flex items-center justify-center p-4">
             {activePage ? (
               <div className="relative max-w-md w-full h-full flex flex-col items-center justify-center">
                 <img
                   src={activePage.warpedDataUrl}
                   alt={`Página ${selectedPageIndex + 1}`}
-                  className="max-h-[50vh] max-w-full object-contain rounded-xl shadow-2xl border border-white/10"
+                  className="max-h-[46vh] max-w-full object-contain rounded-xl shadow-2xl border border-white/10"
                 />
 
                 {/* Acciones sobre la página actual */}
@@ -198,21 +262,6 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                   >
                     <RotateCw className="w-4 h-4" />
                   </button>
-
-                  {pages.length > 1 && (
-                    <button
-                      onClick={() => {
-                        onDeletePage(activePage.id);
-                        if (selectedPageIndex >= pages.length - 1) {
-                          setSelectedPageIndex(Math.max(0, pages.length - 2));
-                        }
-                      }}
-                      className="p-2.5 rounded-full bg-red-950/80 backdrop-blur text-red-300 hover:text-red-100 border border-red-500/20 shadow-lg active:scale-95 transition"
-                      title="Eliminar página"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
                 </div>
 
                 <div className="absolute bottom-2 px-3 py-1 rounded-full glass-panel text-[11px] font-mono-numbers text-slate-300">
@@ -222,79 +271,201 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             ) : null}
           </div>
 
-          {/* CARRUSEL DE MINIATURAS + TARJETA [+ 📷 Tomar otra página] */}
-          <div className="px-safe py-2.5 bg-[#0c0f14] border-t border-white/5 overflow-x-auto flex items-center gap-3">
-            {/* Tarjeta Destacada: [+ 📷 Tomar otra página] */}
+          {/* ====================================================================
+              MÓDULO 2: CARRUSEL HORIZONTAL Y BOTÓN VERDE A LA DERECHA
+              Contenedor con scroll horizontal de izquierda a derecha [Toma 1] [Toma 2]...
+              Y el botón verde [+ 📷 Tomar otra página] ESTRICTAMENTE AL FINAL DERECHO
+              ==================================================================== */}
+          <div className="gallery-carousel bg-[#0c0f14] border-t border-white/10">
+            {/* 1. Tomas ya capturadas de izquierda a derecha con papelera flotante individual */}
+            {pages.map((p, idx) => (
+              <div
+                key={p.id}
+                className={`gallery-card ${selectedPageIndex === idx ? 'selected' : ''}`}
+                onClick={() => setSelectedPageIndex(idx)}
+              >
+                <img
+                  src={p.warpedDataUrl}
+                  alt={`Toma ${idx + 1}`}
+                  className="w-full h-full object-cover"
+                />
+
+                {/* Botón flotante papelera roja (🗑️) con fondo circular para eliminar tomas individuales */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerHaptic(25);
+                    onDeletePage(p.id);
+                    if (selectedPageIndex >= pages.length - 1) {
+                      setSelectedPageIndex(Math.max(0, pages.length - 2));
+                    }
+                  }}
+                  className="gallery-delete-btn"
+                  title="Eliminar esta toma"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+
+                {/* Contador de toma */}
+                <span className="absolute bottom-0 inset-x-0 bg-black/80 text-[10px] text-center font-bold font-mono-numbers text-white py-0.5">
+                  Toma {idx + 1}
+                </span>
+              </div>
+            ))}
+
+            {/* 2. BOTÓN VERDE [+ 📷 Tomar otra página] ESTRICTAMENTE A LA DERECHA DE TODAS LAS TOMAS */}
             {pages.length < maxPages && (
               <button
+                type="button"
                 onClick={onAddMorePages}
-                className="flex-shrink-0 w-24 h-20 rounded-xl bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 border-2 border-dashed border-emerald-400/60 hover:border-emerald-400 flex flex-col items-center justify-center text-emerald-300 p-2 transition active:scale-95 shadow-md"
+                className="gallery-add-card"
+                title="Tomar otra página"
               >
-                <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center mb-1">
-                  <Camera className="w-4 h-4 text-emerald-300" />
+                <div className="w-10 h-10 rounded-full bg-emerald-500/25 flex items-center justify-center">
+                  <Camera className="w-5 h-5 text-emerald-300" />
                 </div>
-                <span className="text-[10px] font-bold text-center leading-tight">
+                <span className="text-[11px] font-black text-center leading-tight">
                   + 📷 Tomar otra página
                 </span>
               </button>
             )}
-
-            {/* Miniaturas de las páginas ya escaneadas */}
-            {pages.map((p, idx) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedPageIndex(idx)}
-                className={`relative flex-shrink-0 w-16 h-20 rounded-xl overflow-hidden border-2 transition ${
-                  selectedPageIndex === idx
-                    ? 'border-emerald-400 ring-2 ring-emerald-400/30 scale-105'
-                    : 'border-slate-800 opacity-60 hover:opacity-100'
-                }`}
-              >
-                <img src={p.warpedDataUrl} alt={`Página ${idx + 1}`} className="w-full h-full object-cover" />
-                <span className="absolute bottom-0 inset-x-0 bg-black/75 text-[9px] text-center font-mono-numbers text-white py-0.5">
-                  {idx + 1}
-                </span>
-              </button>
-            ))}
           </div>
 
-          {/* CASILLA DE VERIFICACIÓN DE METADATOS Y HASH SHA-256 */}
-          <div className="px-safe py-2.5 bg-[#0e131d] border-t border-white/5 flex items-center justify-between">
-            <label className="flex items-center gap-2.5 cursor-pointer text-xs text-slate-200 select-none">
+          {/* ====================================================================
+              MÓDULO 4: DOBLE CASILLA CONDICIONAL (HASH Y FIRMA + SELFIE)
+              Casilla 1 (Principal): Metadatos y Hash SHA-256
+              Casilla 2 (Condicional): Comparecencia (Firma táctil y Foto frontal)
+              ==================================================================== */}
+          <div className="px-safe py-3 bg-[#0e131d] border-t border-white/5 flex flex-col gap-2.5">
+            {/* Casilla 1: Principal (Metadatos y Hash SHA-256) */}
+            <label className="touch-checkbox-label">
               <input
                 type="checkbox"
                 checked={includeMetadata}
-                onChange={(e) => setIncludeMetadata(e.target.checked)}
-                className="w-4 h-4 rounded text-emerald-500 focus:ring-0 cursor-pointer accent-emerald-500"
+                onChange={(e) => handleToggleMetadata(e.target.checked)}
+                className="touch-checkbox"
               />
-              <span className="flex items-center gap-1.5 font-medium">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                Generar archivo de metadatos y Hash (SHA-256)
-              </span>
+              <div className="flex-1 flex items-center justify-between">
+                <span className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                  <span>Generar archivo de metadatos y Hash (SHA-256)</span>
+                </span>
+              </div>
             </label>
+
+            {/* Casilla 2: Condicional y Opcional (Visible ÚNICAMENTE cuando Casilla 1 está activa) */}
+            {includeMetadata && (
+              <div className="pl-6 animate-fadeIn">
+                <label className="touch-checkbox-label bg-emerald-950/20 border-emerald-500/30 text-emerald-200">
+                  <input
+                    type="checkbox"
+                    checked={includeAppearance}
+                    onChange={(e) => handleToggleAppearance(e.target.checked)}
+                    className="touch-checkbox"
+                  />
+                  <div className="flex-1 flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-xs font-semibold">
+                      <UserCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                      <span>Incluir comparecencia (Firma táctil y Foto frontal del otorgante)</span>
+                    </span>
+                    {appearanceData && (
+                      <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded-full font-black">
+                        ✓ Lista
+                      </span>
+                    )}
+                  </div>
+                </label>
+              </div>
+            )}
           </div>
 
-          {/* BARRA INFERIOR DE ACCIÓN ERGONÓMICA: GUARDAR / ENVIAR */}
+          {/* ====================================================================
+              MÓDULO 6: MENÚ DE ENVÍO MULTICANAL (WHATSAPP, CORREO, DESCARGA)
+              ==================================================================== */}
           <div className="pb-safe px-safe pt-3 pb-4 bg-[#0a0f18] border-t border-white/10 flex flex-col gap-2 z-20">
-            <button
-              onClick={handleExecuteSaveAndSend}
-              disabled={isGenerating || pages.length === 0}
-              className="btn-touch-primary w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-base min-h-[52px] py-[14px] px-[28px] rounded-2xl shadow-xl shadow-emerald-500/30 active:scale-98 disabled:opacity-50"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Procesando {activeFormat.toUpperCase()}...</span>
-                </>
-              ) : (
-                <>
-                  <Share2 className="w-5 h-5 stroke-[2.2]" />
-                  <span>Guardar / Enviar</span>
-                </>
-              )}
-            </button>
+            {!showDispatchMenu ? (
+              <button
+                type="button"
+                onClick={() => setShowDispatchMenu(true)}
+                disabled={isGenerating || pages.length === 0}
+                className="btn-touch-primary w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-base flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/30"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Compilando documento...</span>
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-5 h-5 stroke-[2.2]" />
+                    <span>Guardar / Enviar</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              /* MENÚ MULTICANAL ABIERTO CON 3 BOTONES TÁCTILES GRANDES */
+              <div className="flex flex-col gap-2.5 animate-scaleUp">
+                <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
+                  <span className="font-bold text-white">Selecciona método de despacho:</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowDispatchMenu(false)}
+                    className="text-xs text-slate-400 hover:text-white"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+
+                {/* Opción 1: WhatsApp */}
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDispatch('whatsapp')}
+                  className="btn-touch-action w-full bg-[#128c7e] hover:bg-[#075e54] text-white font-bold flex items-center justify-center gap-2.5 shadow-md"
+                >
+                  <Send className="w-5 h-5 text-emerald-200" />
+                  <span>📱 Compartir por WhatsApp</span>
+                </button>
+
+                {/* Opción 2: Correo Electrónico */}
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDispatch('email')}
+                  className="btn-touch-action w-full bg-slate-800 hover:bg-slate-700 text-white font-bold flex items-center justify-center gap-2.5 border border-white/10"
+                >
+                  <Mail className="w-5 h-5 text-cyan-400" />
+                  <span>✉️ Enviar por Correo Electrónico</span>
+                </button>
+
+                {/* Opción 3: Descargar en este Teléfono */}
+                <button
+                  type="button"
+                  onClick={() => handleExecuteDispatch('download')}
+                  className="btn-touch-action w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-500/20"
+                >
+                  <Download className="w-5 h-5 stroke-[2.5]" />
+                  <span>💾 Descargar en este Teléfono</span>
+                </button>
+              </div>
+            )}
           </div>
         </>
+      )}
+
+      {/* MODAL DE COMPARECENCIA DIGITAL (PASO A: FOTO, PASO B: FIRMA) */}
+      {isAppearanceModalOpen && (
+        <AppearanceModal
+          onClose={() => {
+            setIsAppearanceModalOpen(false);
+            if (!appearanceData) {
+              setIncludeAppearance(false);
+            }
+          }}
+          onConfirm={(data) => {
+            setAppearanceData(data);
+            setIsAppearanceModalOpen(false);
+          }}
+        />
       )}
     </div>
   );

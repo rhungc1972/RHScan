@@ -89,7 +89,8 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ onClose }) => {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Ej. Roberto H. o déjalo vacío"
-                className="w-full p-3 rounded-2xl bg-slate-900 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 transition"
+                style={{ fontSize: '16px' }}
+                className="w-full p-3.5 rounded-2xl bg-slate-900 border border-slate-700 text-base text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 transition"
               />
             </div>
 
@@ -107,15 +108,16 @@ export const FeedbackModal: React.FC<FeedbackModalProps> = ({ onClose }) => {
                   if (error) setError(null);
                 }}
                 placeholder="Escribe aquí tu experiencia, mejoras deseadas o comentarios..."
-                className="w-full p-3 rounded-2xl bg-slate-900 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 transition resize-none"
+                style={{ fontSize: '16px' }}
+                className="w-full p-3.5 rounded-2xl bg-slate-900 border border-slate-700 text-base text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400 transition resize-none"
               />
             </div>
 
             <button
               type="submit"
-              className="w-full py-3.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm tracking-wide transition shadow-lg shadow-emerald-500/25 active:scale-98 flex items-center justify-center gap-2"
+              className="btn-touch-primary w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-base min-h-[50px] tracking-wide transition shadow-lg shadow-emerald-500/25 active:scale-98 flex items-center justify-center gap-2"
             >
-              <Send className="w-4 h-4" />
+              <Send className="w-5 h-5 stroke-[2.2]" />
               <span>Guardar Sugerencia</span>
             </button>
           </form>

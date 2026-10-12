@@ -282,18 +282,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </p>
         </div>
 
-        {/* ACCESO A PANEL DE ADMINISTRACIÓN / AUDITORÍA */}
+        {/* OPCIÓN XX PARA PANEL DE CONTROL Y ESTADÍSTICAS (CLAVE 2089227) */}
         {onOpenAdmin && (
-          <div className="mt-4 pt-3 border-t border-white/10 text-center">
+          <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between">
+            <span className="text-[11px] text-slate-500 font-mono">v2.5</span>
             <button
               onClick={() => {
                 onClose();
                 onOpenAdmin();
               }}
-              className="text-xs text-slate-400 hover:text-purple-400 transition inline-flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-white/5 active:scale-95"
+              className="text-xs text-slate-400 hover:text-emerald-400 font-mono transition inline-flex items-center gap-1.5 py-1.5 px-3 rounded-xl hover:bg-white/5 active:scale-95"
+              title="Panel de control xx"
             >
-              <KeyRound className="w-3.5 h-3.5 text-purple-400" />
-              <span>Panel de Administración & Debug</span>
+              <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+              <span>xx</span>
             </button>
           </div>
         )}

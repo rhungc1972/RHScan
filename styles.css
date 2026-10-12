@@ -1,7 +1,7 @@
-/* styles.css - RHDocScan v2.0.0 FSM Architecture
+/* styles.css - RHDocScan v2.5.0
  * Mobile Web (PWA), iOS Safari (WebKit) & Android Ergonomics
  * Arquitectura estricta de MÁQUINA DE ESTADOS FINITOS (FSM)
- * Resuelve al 100% el solapamiento visual entre Cámara, Recorte, Galería y Éxito.
+ * Sin solapamiento visual. Botones táctiles de gran área (mínimo 44px - 54px).
  */
 
 :root {
@@ -9,11 +9,13 @@
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
-  --brand-primary: #10b981;
+  --brand-emerald: #10b981;
+  --brand-emerald-dark: #059669;
   --brand-cyan: #38bdf8;
+  --brand-navy: #000080;
   --bg-dark: #0a0f18;
-  --panel-bg: rgba(15, 23, 42, 0.85);
-  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --panel-bg: rgba(15, 23, 42, 0.88);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 * {
@@ -23,7 +25,7 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-html, body, #root, .app-container {
+html, body, #root, .app-viewport {
   width: 100%;
   height: 100%;
   height: 100dvh;
@@ -40,7 +42,6 @@ html, body, #root, .app-container {
 
 /* ==========================================================================
    1. MÁQUINA DE ESTADOS FINITOS (FSM) - PANTALLAS MUTUAMENTE EXCLUYENTES
-   Garantiza que nunca se solapen capas de Cámara, Recorte, Galería o Éxito.
    ========================================================================== */
 
 #screen-camera,
@@ -59,7 +60,6 @@ html, body, #root, .app-container {
   box-sizing: border-box !important;
 }
 
-/* Ocultamiento obligatorio y estricto */
 .screen-hidden,
 #screen-camera.screen-hidden,
 #screen-crop.screen-hidden,
@@ -72,7 +72,6 @@ html, body, #root, .app-container {
   z-index: -1 !important;
 }
 
-/* Visibilidad de pantalla activa */
 .screen-active,
 #screen-camera.screen-active,
 #screen-crop.screen-active,
@@ -84,7 +83,6 @@ html, body, #root, .app-container {
   pointer-events: auto !important;
 }
 
-/* Jerarquía de capas (Z-Index) */
 #screen-camera {
   z-index: 10;
 }
@@ -105,187 +103,265 @@ html, body, #root, .app-container {
 }
 
 /* ==========================================================================
-   2. REGLAS OBLIGATORIAS PARA CONTROLES DE CÁMARA (AISLAMIENTO EN iOS)
-   Los controles inferiores de la cámara SÓLO existen en ESTADO_CAMARA.
+   2. MARCO GUÍA FOLIO / OFICIO Y VISIÓN ARTIFICIAL (ESMERALDA #10b981)
    ========================================================================== */
 
-#screen-camera .camera-controls-container,
-#screen-camera .bottom-bar,
-body[data-screen="screen-camera"] .camera-controls-container,
-body[data-screen="screen-camera"] .bottom-bar {
-  position: fixed !important;
-  bottom: calc(25px + env(safe-area-inset-bottom, 0px)) !important;
-  left: 0 !important;
-  right: 0 !important;
-  width: 100% !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  z-index: 999999 !important;
-  transform: translateZ(0) !important;
-  -webkit-transform: translateZ(0) !important;
-  pointer-events: auto !important;
-}
-
-/* En Recorte, Galería o Éxito: SUPRESIÓN TOTAL de la barra y del obturador */
-body[data-screen="screen-crop"] .camera-controls-container,
-body[data-screen="screen-crop"] .bottom-bar,
-body[data-screen="screen-crop"] .shutter-button,
-body[data-screen="screen-gallery"] .camera-controls-container,
-body[data-screen="screen-gallery"] .bottom-bar,
-body[data-screen="screen-gallery"] .shutter-button,
-body[data-screen="screen-success"] .camera-controls-container,
-body[data-screen="screen-success"] .bottom-bar,
-body[data-screen="screen-success"] .shutter-button {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
-
-/* El elemento de video no debe capturar eventos que bloqueen botones */
-video, .camera-video {
-  pointer-events: none !important;
-  object-fit: cover;
+.camera-preview-container {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  overflow: hidden;
+  background-color: #000;
 }
 
-/* Botón obturador táctil blanco con relieve en iOS Safari */
-.shutter-button {
-  width: 76px !important;
-  height: 76px !important;
-  border-radius: 50% !important;
-  background-color: #ffffff !important;
-  border: 5px solid rgba(255, 255, 255, 0.4) !important;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6) !important;
-  cursor: pointer !important;
-  -webkit-tap-highlight-color: transparent !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  pointer-events: auto !important;
-  touch-action: manipulation !important;
-  transition: transform 0.12s ease;
+.camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: translateZ(0);
 }
 
-.shutter-button:active {
-  transform: scale(0.92) !important;
+.hud-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 15;
 }
 
-/* ==========================================================================
-   3. ÁREAS SEGURAS MÓVILES (NOTCH / HOME INDICATOR)
-   ========================================================================== */
-
-.pt-safe {
-  padding-top: max(12px, env(safe-area-inset-top, 12px));
-}
-
-.pb-safe {
-  padding-bottom: max(16px, env(safe-area-inset-bottom, 16px));
-}
-
-.px-safe {
-  padding-left: max(16px, env(safe-area-inset-left, 16px));
-  padding-right: max(16px, env(safe-area-inset-right, 16px));
-}
-
-/* Paneles translúcidos */
-.glass-panel {
-  background: var(--panel-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.glass-panel-heavy {
-  background: rgba(10, 15, 24, 0.94);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.font-mono-numbers {
-  font-family: 'JetBrains Mono', monospace;
-}
-
-/* Animación de escaneo láser */
-@keyframes laser-sweep {
-  0% {
-    top: 10%;
-    opacity: 0.2;
-  }
-  50% {
-    top: 90%;
-    opacity: 0.8;
-  }
-  100% {
-    top: 10%;
-    opacity: 0.2;
-  }
-}
-
-.animate-laser {
-  animation: laser-sweep 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-}
-
-/* Marco Folio / Oficio translúcido */
-.folio-cutout {
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
-  border: 2px dashed rgba(255, 255, 255, 0.3);
-}
-
-.folio-cutout.stable {
-  border: 2.5px solid #10b981;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45), 0 0 25px rgba(16, 185, 129, 0.35);
+.emerald-active {
+  color: #10b981 !important;
+  border-color: #10b981 !important;
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.4) !important;
 }
 
 /* ==========================================================================
-   4. CORRECCIÓN ERGONÓMICA: BOTONES AMPLIOS Y CÓMODOS (TOUCH-FRIENDLY)
+   3. ERGONOMÍA TÁCTIL (TOUCH-FRIENDLY) - BOTONES DE GRAN ÁREA
    ========================================================================== */
 
-/* Botón de "Observaciones y Sugerencias" en barra superior: amplio y cómodo (mínimo 44px de alto) */
-.btn-header-feedback {
+.btn-header-action {
   min-height: 44px !important;
   padding: 8px 16px !important;
-  font-size: 14px !important;
-  font-weight: bold !important;
-  border-radius: 14px !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  border-radius: 9999px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
   gap: 6px !important;
-  touch-action: manipulation !important;
-  -webkit-tap-highlight-color: transparent !important;
   cursor: pointer !important;
-  transition: all 0.15s ease !important;
+  touch-action: manipulation !important;
+  transition: transform 0.15s ease, background-color 0.15s ease !important;
 }
-
-.btn-header-feedback:active {
+.btn-header-action:active {
   transform: scale(0.96) !important;
 }
 
-/* Botones principales de avance ("Continuar", "Guardar / Enviar", "Repetir foto"): mínimo 52px de alto */
-.btn-touch-action,
 .btn-touch-primary {
   min-height: 52px !important;
   padding: 14px 28px !important;
   font-size: 16px !important;
-  font-weight: bold !important;
-  border-radius: 18px !important;
-  display: inline-flex !important;
+  font-weight: 800 !important;
+  border-radius: 16px !important;
+  letter-spacing: -0.01em !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
+  box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.35) !important;
+  transition: transform 0.15s ease, opacity 0.15s ease !important;
+}
+.btn-touch-primary:active {
+  transform: scale(0.97) !important;
+}
+
+.btn-touch-action {
+  min-height: 52px !important;
+  padding: 14px 28px !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  border-radius: 16px !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
+  transition: transform 0.15s ease, opacity 0.15s ease !important;
+}
+.btn-touch-action:active {
+  transform: scale(0.97) !important;
+}
+
+.btn-restart {
+  min-height: 48px !important;
+  padding: 12px 24px !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  border-radius: 16px !important;
+  cursor: pointer !important;
+}
+
+/* ==========================================================================
+   4. CARRUSEL HORIZONTAL Y TARJETA VERDE A LA DERECHA
+   ========================================================================== */
+
+.gallery-carousel {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 14px !important;
+  padding: 16px !important;
+  -webkit-overflow-scrolling: touch !important;
+  scroll-behavior: smooth !important;
+}
+
+.gallery-card {
+  position: relative !important;
+  flex-shrink: 0 !important;
+  width: 90px !important;
+  height: 125px !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
+  border: 2px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5) !important;
+  background-color: #000 !important;
+}
+
+.gallery-card.selected {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4), 0 8px 24px rgba(0, 0, 0, 0.7) !important;
+  transform: scale(1.04) !important;
+}
+
+.gallery-delete-btn {
+  position: absolute !important;
+  top: 6px !important;
+  right: 6px !important;
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 50% !important;
+  background-color: rgba(220, 38, 38, 0.9) !important;
+  color: #ffffff !important;
+  display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 10px !important;
-  touch-action: manipulation !important;
-  -webkit-tap-highlight-color: transparent !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.8) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6) !important;
   cursor: pointer !important;
-  transition: transform 0.12s ease, background-color 0.15s ease, box-shadow 0.15s ease !important;
+  z-index: 10 !important;
+  touch-action: manipulation !important;
+}
+.gallery-delete-btn:active {
+  transform: scale(0.9) !important;
 }
 
-.btn-touch-action:active,
-.btn-touch-primary:active {
+.gallery-add-card {
+  flex-shrink: 0 !important;
+  width: 110px !important;
+  height: 125px !important;
+  border-radius: 14px !important;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(6, 182, 212, 0.18) 100%) !important;
+  border: 2.5px dashed #10b981 !important;
+  color: #34d399 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 8px !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.15) !important;
+  transition: transform 0.15s ease, background 0.15s ease !important;
+}
+.gallery-add-card:active {
   transform: scale(0.96) !important;
+  background: rgba(16, 185, 129, 0.3) !important;
 }
 
+/* ==========================================================================
+   5. CASILLAS AMPLIADAS (CHECKBOX 24x24px)
+   ========================================================================== */
+
+.touch-checkbox-label {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 10px 14px !important;
+  border-radius: 14px !important;
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  cursor: pointer !important;
+  user-select: none !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  color: #f1f5f9 !important;
+  min-height: 48px !important;
+  touch-action: manipulation !important;
+}
+
+.touch-checkbox {
+  width: 24px !important;
+  height: 24px !important;
+  min-width: 24px !important;
+  min-height: 24px !important;
+  border-radius: 6px !important;
+  accent-color: #10b981 !important;
+  cursor: pointer !important;
+}
+
+/* ==========================================================================
+   6. VISORES Y CANVAS DE COMPARECENCIA (SELFIE OVALADA & FIRMA TÁCTIL)
+   ========================================================================== */
+
+.oval-face-guide {
+  position: relative;
+  width: 210px;
+  height: 270px;
+  border-radius: 50% / 46%;
+  border: 3.5px dashed #10b981;
+  box-shadow: 0 0 0 9999px rgba(10, 15, 24, 0.75), 0 0 30px rgba(16, 185, 129, 0.4);
+  overflow: hidden;
+}
+
+.signature-canvas {
+  width: 100%;
+  height: 220px;
+  background-color: #ffffff;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* ==========================================================================
+   7. INPUTS ANTI-ZOOM SAFARI iOS (FONT-SIZE: 16px MÍNIMO)
+   ========================================================================== */
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea,
+select {
+  font-size: 16px !important; /* Evita que Safari iOS haga zoom automático */
+  -webkit-text-size-adjust: 100% !important;
+}
+
+/* ==========================================================================
+   8. UTILIDADES Y SAFE AREAS
+   ========================================================================== */
+
+.pt-safe { padding-top: max(12px, var(--sat)); }
+.pb-safe { padding-bottom: max(12px, var(--sab)); }
+.px-safe { padding-left: max(16px, var(--sal)); padding-right: max(16px, var(--sar)); }
+
+.glass-panel {
+  background: var(--panel-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.font-mono-numbers {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}

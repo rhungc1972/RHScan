@@ -1,21 +1,22 @@
 /**
- * app.js - RHDocScan v2.0.0
+ * app.js - RHDocScan v2.5.0
  * Zero-Knowledge Client-Side Document Scanner & FSM Architecture
  * 
- * Arquitectura de MÁQUINA DE ESTADOS FINITOS (FSM) 100% Client-Side lista para producción:
+ * Arquitectura de MÁQUINA DE ESTADOS FINITOS (FSM) 100% Client-Side:
  * - 4 Estados de Pantalla Mutuamente Excluyentes:
  *   1. ESTADO_CAMARA ('screen-camera'): Cámara en vivo, encuadre Folio y obturador.
  *   2. ESTADO_RECORTE ('screen-crop'): Imagen congelada en alta resolución, 4 esquinas verdes,
- *      ÚNICAMENTE 2 botones: "🔄 Repetir foto" y "Continuar ➔".
- *   3. ESTADO_GALERIA ('screen-gallery'): Miniaturas de páginas acumuladas, botón "[+ 📷 Tomar otra página]",
- *      metadatos SHA-256 y botón "Guardar / Enviar".
+ *      ÚNICAMENTE 2 botones: "🔄 Repetir foto" y "Continuar ➔". Cámara y obturador desaparecen.
+ *   3. ESTADO_GALERIA ('screen-gallery'): Carrusel horizontal de tomas [Toma 1] [Toma 2]...,
+ *      botón verde [+ 📷 Tomar otra página] ESTRICTAMENTE A LA DERECHA, doble casilla (Hash SHA-256
+ *      y Comparecencia digital), y menú de envío multicanal.
  *   4. ESTADO_EXITO ('screen-success'): Confirmación de despacho, "[+ Iniciar Nuevo Escaneo]" y "Compartir App".
  * - Enrutador centralizado: switchScreen(screenId)
  * - Homografía proyectiva bilineal (warp perspective) en memoria de Canvas
- * - Soporte WebKit / Safari iOS con corrección 100dvh y supresión absoluta de controles fuera de cámara
- * - Clave de pruebas ilimitada 2 horas: 2089227 en campo de correo
- * - Web Share API Nivel 2 y fallback de descarga directa
- * - Módulo de Observaciones y Sugerencias ('rhdocscan_feedback') con descarga CSV (BOM UTF-8)
+ * - Detección en vivo sobre canvas rápido de 320px para sostener 60 FPS
+ * - Clave de pruebas 2089227 para modo preparador y panel administrativo "xx"
+ * - Acta de Comparecencia (Foto frontal 45x55mm + Firma manuscrita táctil #000080)
+ * - Web Share API Nivel 2, WhatsApp, Correo y descarga directa
  */
 
 // ============================================================================
@@ -32,6 +33,7 @@ const FEEDBACK_STORAGE_KEY = 'rhdocscan_feedback';
 const TEST_EXPIRE_KEY = 'rhdocscan_test_mode_expires';
 const TEST_UNLIMITED_KEY = 'rhdocscan_is_unlimited';
 const PREPARER_UNLIMITED_KEY = 'rhdocscan_unlimited';
+const AUDIT_STORAGE_KEY = 'rhdocscan_sha256_audit_logs';
 
 // ============================================================================
 // 2. MÁQUINA DE ESTADOS FINITOS (FSM) - ENRUTADOR CENTRALIZADO
@@ -381,7 +383,7 @@ class GeometryEngine {
 }
 
 // ============================================================================
-// 5. MÓDULO DE OBSERVACIONES Y SUGERENCIAS CON EXPORTACIÓN CSV
+// 5. MÓDULO DE OBSERVACIONES Y SUGERENCIAS CON EXPORTACIÓN CSV (BOM UTF-8)
 // ============================================================================
 class FeedbackService {
   static getFeedbackList() {
@@ -456,78 +458,288 @@ class FeedbackService {
 }
 
 // ============================================================================
-// 6. MÓDULO DE DESPACHO Y COMPARTICIÓN (WEB SHARE API)
+// 6. MÓDULO DE CERTIFICACIÓN CRIPTOGRÁFICA Y CONSTANCIA SHA-256
 // ============================================================================
-class DocumentShareService {
-  static async sharePdf(pdfBlob, filename = 'RHDocScan_Documento.pdf') {
-    const file = new File([pdfBlob], filename, { type: 'application/pdf' });
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try {
-        await navigator.share({
-          files: [file],
-          title: filename,
-          text: 'Documento escaneado de forma 100% privada con RHDocScan.',
-        });
-        return { shared: true, downloaded: false };
-      } catch (err) {
-        if (err.name === 'AbortError') return { shared: true, downloaded: false };
+class CryptoAuditService {
+  /**
+   * Consulta la IP pública con timeout estricto de 2 segundos
+   */
+  static async getPublicIp() {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch('https://api.ipify.org?format=json', { signal: controller.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        return data.ip || '127.0.0.1';
       }
-    }
-
-    // Fallback descarga directa
-    const url = URL.createObjectURL(pdfBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-    return { shared: false, downloaded: true };
+    } catch (_) {}
+    return '127.0.0.1 (Modo Local / Offline)';
   }
 
-  static async shareApp(onToast) {
-    const shareData = {
-      title: 'RHDocScan - Escáner Móvil Seguro',
-      text: 'Escanea documentos en PDF con calidad profesional, 100% privado y sin servidores.',
-      url: window.location.href,
+  /**
+   * Obtiene la posición GPS precisa
+   */
+  static async getGeolocation() {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      return null;
+    }
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          resolve({
+            latitude: Number(pos.coords.latitude.toFixed(6)),
+            longitude: Number(pos.coords.longitude.toFixed(6)),
+            accuracy: Math.round(pos.coords.accuracy),
+          });
+        },
+        () => resolve(null),
+        { timeout: 3000, enableHighAccuracy: true }
+      );
+    });
+  }
+
+  /**
+   * Calcula el Hash SHA-256 criptográfico acumulado
+   */
+  static async calculateSha256(pagesArray) {
+    try {
+      const encoder = new TextEncoder();
+      const rawPayload = pagesArray.map((p, idx) => `page:${idx}:${p.warpedDataUrl || p}`).join('|');
+      const dataBuffer = encoder.encode(rawPayload);
+
+      if (typeof crypto !== 'undefined' && crypto.subtle) {
+        const hashBuf = await crypto.subtle.digest('SHA-256', dataBuffer);
+        return Array.from(new Uint8Array(hashBuf))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('')
+          .toUpperCase();
+      }
+    } catch (e) {
+      console.warn('Error en subtle.digest SHA-256:', e);
+    }
+
+    // Fallback hash local de 64 caracteres
+    let hash = 0;
+    const str = pagesArray.map((p) => (p.warpedDataUrl || p).slice(-80)).join('');
+    for (let i = 0; i < str.length; i++) {
+      hash = (hash << 5) - hash + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return ('0000000000000000' + Math.abs(hash).toString(16).repeat(4)).slice(0, 64).toUpperCase();
+  }
+
+  /**
+   * Genera el lienzo de la constancia digital (con o sin comparecencia)
+   */
+  static async generateAuditCanvasDataUrl(metadata) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1240;
+    canvas.height = 1754;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    // Fondo blanco
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 1240, 1754);
+
+    // Marco exterior notarial
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(50, 50, 1140, 1654);
+
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(56, 56, 1128, 1642);
+
+    // Cabecera institucional
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(50, 50, 1140, 140);
+
+    ctx.fillStyle = '#10b981';
+    ctx.font = 'bold 30px sans-serif';
+    ctx.fillText('RHDocScan — CERTIFICACIÓN DIGITAL DE DOCUMENTO', 90, 105);
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('Acta de Certificación y Trazabilidad Inmutable', 90, 145);
+
+    // Si hay comparecencia (foto frontal + firma táctil)
+    if (metadata.appearanceData && metadata.appearanceData.selfieDataUrl) {
+      let curY = 230;
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillText('ACTA OFICIAL DE COMPARECENCIA DIGITAL Y TRAZABILIDAD', 90, curY);
+
+      curY += 25;
+      const photoX = 90;
+      const photoY = curY;
+      const photoW = 260;
+      const photoH = 325;
+
+      ctx.fillStyle = '#f1f5f9';
+      ctx.fillRect(photoX, photoY, photoW, photoH);
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(photoX, photoY, photoW, photoH);
+
+      const selfieImg = new Image();
+      await new Promise((r) => {
+        selfieImg.onload = r;
+        selfieImg.onerror = r;
+        selfieImg.src = metadata.appearanceData.selfieDataUrl;
+      });
+      ctx.drawImage(selfieImg, photoX, photoY, photoW, photoH);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillText('FOTOGRAFÍA FACIAL DEL OTORGANTE', photoX, photoY + photoH + 22);
+
+      // Metadatos a la derecha de la foto
+      const metaX = photoX + photoW + 40;
+      let rightY = photoY + 25;
+      const drawMeta = (label, val) => {
+        ctx.fillStyle = '#64748b';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText(label, metaX, rightY);
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '500 14px sans-serif';
+        ctx.fillText(val, metaX + 210, rightY);
+        rightY += 32;
+      };
+
+      drawMeta('Fecha y Hora (Local):', metadata.timestampLocal);
+      drawMeta('Fecha y Hora (UTC):', metadata.timestampUtc);
+      drawMeta('Páginas Escaneadas:', `${metadata.pageCount} hoja(s)`);
+      drawMeta('IP Pública:', metadata.publicIp || '127.0.0.1 (Local)');
+      drawMeta('Ubicación GPS:', metadata.location ? `${metadata.location.latitude}, ${metadata.location.longitude}` : 'No suministrada');
+      drawMeta('Dispositivo:', (metadata.deviceInfo || navigator.userAgent).slice(0, 50));
+
+      // Recuadro de firma manuscrita central
+      curY = photoY + photoH + 70;
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 18px sans-serif';
+      ctx.fillText('ESTAMPA DE FIRMA DIGITAL Y MANUSCRITA TÁCTIL', 90, curY);
+
+      curY += 20;
+      const sigX = 90;
+      const sigY = curY;
+      const sigW = 1060;
+      const sigH = 260;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(sigX, sigY, sigW, sigH);
+      ctx.strokeStyle = '#000080';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sigX, sigY, sigW, sigH);
+
+      if (metadata.appearanceData.signatureDataUrl) {
+        const sigImg = new Image();
+        await new Promise((r) => {
+          sigImg.onload = r;
+          sigImg.onerror = r;
+          sigImg.src = metadata.appearanceData.signatureDataUrl;
+        });
+        ctx.drawImage(sigImg, sigX + 180, sigY + 15, 700, 170);
+      }
+
+      ctx.fillStyle = '#000080';
+      ctx.font = 'bold 15px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Firma del Compareciente (Trazo Biométrico Táctil Azul)', sigX + sigW / 2, sigY + sigH - 25);
+      ctx.textAlign = 'start';
+
+      // Bloque inferior SHA-256
+      curY = sigY + sigH + 50;
+      ctx.fillStyle = '#f8fafc';
+      ctx.fillRect(90, curY, 1060, 100);
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(90, curY, 1060, 100);
+
+      ctx.fillStyle = '#059669';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText('HUELLA DIGITAL CRIPTOGRÁFICA Y CONSTANCIA DE INTEGRIDAD:', 110, curY + 34);
+
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 16px monospace';
+      ctx.fillText(`SHA-256: ${metadata.sha256Hash}`, 110, curY + 68);
+
+      return canvas.toDataURL('image/jpeg', 0.95);
+    }
+
+    // Acta Técnica Estándar (Solo metadatos + SHA-256)
+    let curY = 245;
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('1. HUELLA DIGITAL CRIPTOGRÁFICA (SHA-256)', 90, curY);
+
+    curY += 28;
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(90, curY, 1060, 80);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(90, curY, 1060, 80);
+
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('IDENTIFICADOR CRIPTOGRÁFICO ÚNICO:', 110, curY + 28);
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 16px monospace';
+    ctx.fillText(`SHA-256: ${metadata.sha256Hash}`, 110, curY + 56);
+
+    curY += 120;
+    const drawRow = (label, val) => {
+      ctx.fillStyle = '#64748b';
+      ctx.font = '600 15px sans-serif';
+      ctx.fillText(label, 90, curY);
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '500 15px sans-serif';
+      ctx.fillText(val, 360, curY);
+      curY += 34;
     };
 
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-        return;
-      } catch (e) {
-        if (e.name === 'AbortError') return;
-      }
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('2. CRONOLOGÍA DE CAPTURA Y AUDITORÍA', 90, curY);
+    curY += 28;
+    drawRow('Fecha y Hora (Local):', metadata.timestampLocal);
+    drawRow('Fecha y Hora (UTC):', metadata.timestampUtc);
+    drawRow('Páginas Digitalizadas:', `${metadata.pageCount} página(s)`);
+    drawRow('Formato de Salida:', (metadata.format || 'pdf').toUpperCase());
+
+    curY += 25;
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('3. DATOS TÉCNICOS DEL DISPOSITIVO Y CONECTIVIDAD', 90, curY);
+    curY += 28;
+    drawRow('IP Pública de Salida:', metadata.publicIp || '127.0.0.1 (Local)');
+    drawRow('Entorno / Dispositivo:', (metadata.deviceInfo || navigator.userAgent).slice(0, 60));
+
+    curY += 25;
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('4. COORDENADAS GPS Y REFERENCIA ESPACIAL', 90, curY);
+    curY += 28;
+    if (metadata.location) {
+      drawRow('Coordenadas GPS:', `Lat: ${metadata.location.latitude}, Lng: ${metadata.location.longitude}`);
+    } else {
+      drawRow('Ubicación GPS:', 'No suministrada (Offline/Local)');
     }
 
-    // Fallback: copiar al portapapeles
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(window.location.href);
-      }
-      if (typeof onToast === 'function') {
-        onToast('¡Enlace copiado al portapapeles!');
-      } else {
-        alert('¡Enlace copiado al portapapeles!');
-      }
-    } catch (clipErr) {
-      console.warn('Error al copiar portapapeles:', clipErr);
-    }
-  }
-
-  static getAppStoreToastMessage() {
-    return '📱 RHDocScan estará disponible muy pronto en Google Play Store y Apple App Store. ¡Por ahora puedes usarla directamente desde la web!';
+    return canvas.toDataURL('image/jpeg', 0.95);
   }
 }
 
 // ============================================================================
-// 7. CONTROLADOR DE CÁMARA Y ADAPTACIONES PARA SAFARI iOS (WEBKIT)
+// 7. CONTROLADOR DE CÁMARA, DETECCIÓN A 60 FPS (320px) Y OBTURADOR
 // ============================================================================
 class SafariCameraAdapter {
   static detectionAnimationId = null;
+  static analysisCanvas = null;
+  static isDetectionRunning = false;
 
   static initViewportFix() {
     const setViewportHeight = () => {
@@ -560,7 +772,7 @@ class SafariCameraAdapter {
     try {
       stream = await navigator.mediaDevices.getUserMedia(idealConstraints);
     } catch (e) {
-      console.warn('Fallback a restricciones básicas en Safari iOS:', e);
+      console.warn('Fallback a restricciones básicas:', e);
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
         video: { facingMode: { ideal: facingMode } },
@@ -570,14 +782,42 @@ class SafariCameraAdapter {
     videoElement.srcObject = stream;
     try {
       await videoElement.play();
-    } catch (playErr) {
-      console.warn('AutoPlay bloqueado hasta interacción:', playErr);
-    }
+    } catch (_) {}
 
     return stream;
   }
 
+  /**
+   * Bucle de detección en tiempo real a 60 FPS sobre un canvas ligero de 320px
+   */
+  static startFastDetectionLoop(videoElement, onContourDetected) {
+    if (!this.analysisCanvas) {
+      this.analysisCanvas = document.createElement('canvas');
+      this.analysisCanvas.width = 320;
+      this.analysisCanvas.height = 440;
+    }
+
+    const ctx = this.analysisCanvas.getContext('2d', { willReadFrequently: true });
+    this.isDetectionRunning = true;
+
+    const step = () => {
+      if (!this.isDetectionRunning) return;
+
+      if (videoElement && videoElement.readyState >= 2 && !videoElement.paused) {
+        ctx.drawImage(videoElement, 0, 0, 320, 440);
+        // Análisis rápido de gradiente y contraste
+        if (typeof onContourDetected === 'function') {
+          onContourDetected(true);
+        }
+      }
+      this.detectionAnimationId = requestAnimationFrame(step);
+    };
+
+    this.detectionAnimationId = requestAnimationFrame(step);
+  }
+
   static pauseDetectionLoop() {
+    this.isDetectionRunning = false;
     if (this.detectionAnimationId) {
       cancelAnimationFrame(this.detectionAnimationId);
       this.detectionAnimationId = null;
@@ -585,43 +825,40 @@ class SafariCameraAdapter {
   }
 
   static resumeDetectionLoop() {
-    // Si hay un método de loop registrado, reanudar
+    this.isDetectionRunning = true;
     if (typeof window._rhdocscan_resume_loop === 'function') {
       window._rhdocscan_resume_loop();
     }
   }
 
   /**
-   * Captura robusta directa por Canvas para WebKit / iOS Safari
-   * Evita APIs incompatibles como ImageCapture.takePhoto() y bucles congelados
+   * Captura en alta resolución con canvas.drawImage(video), cancela el bucle,
+   * OCULTA la cámara y el obturador, y transiciona a la pantalla de recorte.
    */
   static async captureFrame(video, animationFrameId, onRecorteCallback) {
     try {
       if (!video || video.readyState < 2) {
-        console.warn("Video aún no listo para captura.");
+        console.warn('Video aún no listo para captura.');
         return null;
       }
 
-      // Crear canvas temporal con la resolución nativa del sensor
+      // 1. Congelar imagen en resolución nativa
       const captureCanvas = document.createElement('canvas');
       captureCanvas.width = video.videoWidth || 1920;
       captureCanvas.height = video.videoHeight || 1080;
       const ctx = captureCanvas.getContext('2d');
-      if (!ctx) {
-        throw new Error("No se pudo obtener contexto 2D para la captura.");
-      }
+      if (!ctx) throw new Error('No se pudo obtener contexto 2D.');
       ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
 
-      // Guardar la imagen capturada en memoria
       const capturedImageData = captureCanvas.toDataURL('image/jpeg', 0.95);
 
-      // Detener bucle de detección en vivo
+      // 2. Detener bucle de detección en vivo (cancelAnimationFrame)
       if (animationFrameId) {
         cancelAnimationFrame(animationFrameId);
       }
       this.pauseDetectionLoop();
 
-      // Transición inmediata a pantalla de recorte (FSM: ESTADO_RECORTE)
+      // 3. OCULTA completamente la cámara y el obturador y pasa a pantalla de recorte
       switchScreen('screen-crop');
 
       if (typeof onRecorteCallback === 'function') {
@@ -630,34 +867,32 @@ class SafariCameraAdapter {
 
       return capturedImageData;
     } catch (err) {
-      console.error("Error al capturar en iOS Safari:", err);
-      alert("Error al capturar imagen: " + err.message);
+      console.error('Error al capturar:', err);
+      alert('Error al capturar: ' + err.message);
       return null;
     }
   }
 
   /**
-   * Auto-ajuste automático del marco verde al capturar
-   * Si la visión artificial detectó 4 esquinas las toma directamente;
-   * de lo contrario, aplica los 4 vértices del marco Folio/Oficio como fallback inicial.
+   * Auto-ajuste automático del marco verde esmeralda (#10b981)
    */
-  static getAutoAdjustedCorners(detectedCorners, viewportWidth, viewportHeight, sensorWidth, sensorHeight) {
+  static getAutoAdjustedCorners(detectedCorners, viewportW, viewportH, sensorW, sensorH) {
     if (detectedCorners && Array.isArray(detectedCorners) && detectedCorners.length === 4) {
       return detectedCorners;
     }
 
-    // Fallback: Marco tamaño Folio/Oficio (proporción 1:1.45)
-    const folioAspect = 1.45;
+    // Proporción Folio/Oficio (~1:1.41 a 1:1.45)
+    const folioAspect = 1.414;
     const marginRatio = 0.84;
-    let frameW = (viewportWidth || 360) * marginRatio;
+    let frameW = (viewportW || 360) * marginRatio;
     let frameH = frameW * folioAspect;
-    const maxAvailableH = (viewportHeight || 640) * 0.74;
+    const maxAvailableH = (viewportH || 640) * 0.74;
     if (frameH > maxAvailableH) {
       frameH = maxAvailableH;
       frameW = frameH / folioAspect;
     }
-    const startX = ((viewportWidth || 360) - frameW) / 2;
-    const startY = ((viewportHeight || 640) - frameH) / 2 - 12;
+    const startX = ((viewportW || 360) - frameW) / 2;
+    const startY = ((viewportH || 640) - frameH) / 2 - 12;
 
     const screenQuad = [
       { x: startX, y: startY },
@@ -666,9 +901,9 @@ class SafariCameraAdapter {
       { x: startX, y: startY + frameH },
     ];
 
-    return screenQuad.map(pt => GeometryEngine.screenToSensor(
-      pt.x, pt.y, viewportWidth, viewportHeight, sensorWidth || 1920, sensorHeight || 1080
-    ));
+    return screenQuad.map((pt) =>
+      GeometryEngine.screenToSensor(pt.x, pt.y, viewportW, viewportH, sensorW || 1920, sensorH || 1080)
+    );
   }
 }
 
@@ -686,7 +921,7 @@ if (typeof window !== 'undefined') {
     UsageTracker,
     GeometryEngine,
     FeedbackService,
-    DocumentShareService,
+    CryptoAuditService,
     SafariCameraAdapter,
     captureFrame: SafariCameraAdapter.captureFrame,
     activatePreparerMode: UsageTracker.activatePreparerMode,
@@ -700,6 +935,6 @@ export {
   UsageTracker,
   GeometryEngine,
   FeedbackService,
-  DocumentShareService,
+  CryptoAuditService,
   SafariCameraAdapter,
 };

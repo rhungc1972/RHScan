@@ -19,11 +19,12 @@ export interface ExportResult {
 }
 
 /**
- * Compila las páginas escaneadas en un archivo PDF optimizado con opción de Acta de Metadatos
+ * Compila las páginas escaneadas en un archivo PDF optimizado con opción de Acta de Metadatos y Comparecencia
  */
 export async function generatePdfBlob(
   pages: ScannedPage[],
-  includeMetadata: boolean = false
+  includeMetadata: boolean = false,
+  appearanceData?: import('../types').AppearanceData
 ): Promise<{ blob: Blob; fileName: string; metadata?: DocumentMetadata }> {
   if (!pages || pages.length === 0) {
     throw new Error('No hay páginas para generar el documento PDF.');
@@ -55,13 +56,13 @@ export async function generatePdfBlob(
   let metadata: DocumentMetadata | undefined;
   if (includeMetadata) {
     try {
-      metadata = await collectDocumentMetadata(pages, 'pdf');
+      metadata = await collectDocumentMetadata(pages, 'pdf', appearanceData);
       pdf.addPage('a4', 'portrait');
 
       // Intentar dibujar con alta fidelidad gráfica mediante el canvas del acta
       let renderedViaCanvas = false;
       try {
-        const auditPageUrl = generateAuditPageDataUrl(metadata);
+        const auditPageUrl = await generateAuditPageDataUrl(metadata);
         if (auditPageUrl && auditPageUrl.length > 50) {
           pdf.addImage(auditPageUrl, 'JPEG', margin, margin, targetW, targetH, undefined, 'FAST');
           renderedViaCanvas = true;
@@ -132,7 +133,8 @@ export async function generatePdfBlob(
  */
 export async function generateJpgBlob(
   pages: ScannedPage[],
-  includeMetadata: boolean = false
+  includeMetadata: boolean = false,
+  appearanceData?: import('../types').AppearanceData
 ): Promise<{ blob: Blob; fileName: string; metadata?: DocumentMetadata }> {
   if (!pages || pages.length === 0) {
     throw new Error('No hay páginas para generar el archivo JPG.');
@@ -140,7 +142,7 @@ export async function generateJpgBlob(
 
   let metadata: DocumentMetadata | undefined;
   if (includeMetadata) {
-    metadata = await collectDocumentMetadata(pages, 'jpg');
+    metadata = await collectDocumentMetadata(pages, 'jpg', appearanceData);
   }
 
   // Si hay una sola página y no hay metadatos, exportar directamente
@@ -155,7 +157,8 @@ export async function generateJpgBlob(
   const loadedImgs: HTMLImageElement[] = [];
   const imgUrls = pages.map((p) => p.warpedDataUrl);
   if (includeMetadata && metadata) {
-    imgUrls.push(generateAuditPageDataUrl(metadata));
+    const auditUrl = await generateAuditPageDataUrl(metadata);
+    imgUrls.push(auditUrl);
   }
 
   await Promise.all(
@@ -202,12 +205,14 @@ export async function generateJpgBlob(
 export async function shareOrDownloadDocument(
   pages: ScannedPage[],
   format: ExportFormat = 'pdf',
-  includeMetadata: boolean = false
+  includeMetadata: boolean = false,
+  appearanceData?: import('../types').AppearanceData,
+  dispatchChannel?: 'whatsapp' | 'email' | 'download'
 ): Promise<ExportResult> {
   const { blob, fileName, metadata } =
     format === 'pdf'
-      ? await generatePdfBlob(pages, includeMetadata)
-      : await generateJpgBlob(pages, includeMetadata);
+      ? await generatePdfBlob(pages, includeMetadata, appearanceData)
+      : await generateJpgBlob(pages, includeMetadata, appearanceData);
 
   // Registrar en la auditoría local forense SHA-256
   try {
@@ -227,12 +232,28 @@ export async function shareOrDownloadDocument(
   const mimeType = format === 'pdf' ? 'application/pdf' : 'image/jpeg';
   const file = new File([blob], fileName, { type: mimeType });
 
-  // 1. Probar Web Share API Nivel 2
+  // Si el usuario eligió específicamente descarga directa
+  if (dispatchChannel === 'download') {
+    downloadBlobDirectly(blob, fileName);
+    return {
+      sharedViaNativeSheet: false,
+      downloadTriggered: true,
+      fileName,
+      format,
+      metadata,
+    };
+  }
+
+  // 1. Probar Web Share API Nivel 2 (WhatsApp, Correo, o Selector Nativo)
   if (typeof navigator !== 'undefined' && 'canShare' in navigator && 'share' in navigator) {
     try {
+      const shareText = dispatchChannel === 'whatsapp'
+        ? `📄 Adjunto documento digitalizado con RHDocScan (${format.toUpperCase()})`
+        : `Documento escaneado de forma 100% privada con RHDocScan (${format.toUpperCase()}).`;
+
       const shareData = {
         title: fileName,
-        text: `Documento escaneado de forma 100% privada con RHDocScan (${(format || 'pdf').toUpperCase()}).`,
+        text: shareText,
         files: [file],
       };
 
@@ -261,7 +282,16 @@ export async function shareOrDownloadDocument(
     }
   }
 
-  // 2. Respaldo: Descarga directa al teléfono
+  // Fallback si eligió email y no pudo compartir con archivo
+  if (dispatchChannel === 'email') {
+    try {
+      const subject = encodeURIComponent(`Documento Digitalizado - ${fileName}`);
+      const body = encodeURIComponent(`Adjunto el documento procesado con RHDocScan.\nArchivo: ${fileName}\nIntegridad SHA-256: ${metadata?.sha256Hash || 'Verificado'}`);
+      window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    } catch (_) {}
+  }
+
+  // 2. Respaldo o descarga directa
   downloadBlobDirectly(blob, fileName);
   return {
     sharedViaNativeSheet: false,

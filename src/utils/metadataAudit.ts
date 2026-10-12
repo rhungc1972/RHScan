@@ -86,7 +86,8 @@ export async function calculateDocumentSha256(pages: ScannedPage[]): Promise<str
  */
 export async function collectDocumentMetadata(
   pages: ScannedPage[],
-  format: ExportFormat
+  format: ExportFormat,
+  appearanceData?: import('../types').AppearanceData
 ): Promise<DocumentMetadata> {
   const now = new Date();
   const timestampLocal = now.toLocaleString('es-ES', {
@@ -119,6 +120,7 @@ export async function collectDocumentMetadata(
     screenResolution: screenRes,
     publicIp,
     location,
+    appearanceData,
   };
 }
 
@@ -126,8 +128,10 @@ export async function collectDocumentMetadata(
 /**
  * Genera el "Acta de Certificación y Trazabilidad Digital" como imagen A4 de alta resolución
  * SIN código QR, con tipografía limpia y formal.
+ * Si incluye comparecencia: estampa la foto frontal del otorgante (45x55mm) a la izquierda,
+ * metadatos a la derecha, recuadro de firma manuscrita central y bloque SHA-256 inferior.
  */
-export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
+export async function generateAuditPageDataUrl(metadata: DocumentMetadata): Promise<string> {
   const canvas = document.createElement('canvas');
   // Proporción A4 a 150 DPI: 1240 x 1754 px
   canvas.width = 1240;
@@ -173,7 +177,165 @@ export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
   ctx.fillText('ZERO-KNOWLEDGE', 0, 5);
   ctx.restore();
 
-  // Sección 1: Huella Criptográfica SHA-256
+  const drawImageSafe = async (dataUrl: string): Promise<HTMLImageElement | null> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+  };
+
+  // CASO B: ACTA CON COMPARECENCIA (Foto frontal del otorgante + Firma táctil)
+  if (metadata.appearanceData && metadata.appearanceData.selfieDataUrl) {
+    const selfieImg = await drawImageSafe(metadata.appearanceData.selfieDataUrl);
+    const signatureImg = metadata.appearanceData.signatureDataUrl
+      ? await drawImageSafe(metadata.appearanceData.signatureDataUrl)
+      : null;
+
+    let curY = 230;
+
+    // Encabezado de la comparecencia
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('ACTA OFICIAL DE COMPARECENCIA DIGITAL Y TRAZABILIDAD', 90, curY);
+
+    curY += 25;
+
+    // 1. FOTO FRONTAL DEL OTORGANTE (Superior Izquierda: 260x320 px ~ 45x55mm)
+    const photoX = 90;
+    const photoY = curY;
+    const photoW = 260;
+    const photoH = 325;
+
+    ctx.fillStyle = '#f1f5f9';
+    ctx.fillRect(photoX, photoY, photoW, photoH);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(photoX, photoY, photoW, photoH);
+
+    if (selfieImg) {
+      ctx.drawImage(selfieImg, photoX, photoY, photoW, photoH);
+    } else {
+      ctx.fillStyle = '#64748b';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Foto del Otorgante', photoX + photoW / 2, photoY + photoH / 2);
+      ctx.textAlign = 'start';
+    }
+
+    // Etiqueta debajo de la foto
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText('FOTOGRAFÍA FACIAL DEL OTORGANTE', photoX, photoY + photoH + 22);
+
+    // 2. METADATOS A LA DERECHA DE LA FOTO
+    const metaX = photoX + photoW + 40;
+    let rightY = photoY + 25;
+
+    const drawRightRow = (label: string, val: string) => {
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(label, metaX, rightY);
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '500 14px sans-serif';
+      ctx.fillText(val, metaX + 210, rightY);
+      rightY += 32;
+    };
+
+    drawRightRow('Fecha y Hora (Local):', metadata.timestampLocal);
+    drawRightRow('Fecha y Hora (UTC):', metadata.timestampUtc);
+    drawRightRow('Páginas Escaneadas:', `${metadata.pageCount} hoja(s)`);
+    drawRightRow('IP Pública:', metadata.publicIp || '127.0.0.1 (Local)');
+    if (metadata.location) {
+      drawRightRow('Ubicación GPS:', `${metadata.location.latitude}, ${metadata.location.longitude} (±${metadata.location.accuracy}m)`);
+    } else {
+      drawRightRow('Ubicación GPS:', 'No suministrada (Offline/Local)');
+    }
+    drawRightRow('Entorno / Dispositivo:', metadata.deviceInfo.slice(0, 50));
+
+    // 3. RECUADRO CENTRAL: FIRMA TÁCTIL DEL OTORGANTE
+    curY = photoY + photoH + 70;
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('ESTAMPA DE FIRMA DIGITAL Y MANUSCRITA TÁCTIL', 90, curY);
+
+    curY += 20;
+    const sigX = 90;
+    const sigY = curY;
+    const sigW = 1060;
+    const sigH = 260;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(sigX, sigY, sigW, sigH);
+    ctx.strokeStyle = '#000080';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sigX, sigY, sigW, sigH);
+
+    // Fondo tenue con patrón de líneas notariales
+    ctx.strokeStyle = 'rgba(0, 0, 128, 0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(sigX + 40, sigY + sigH - 60);
+    ctx.lineTo(sigX + sigW - 40, sigY + sigH - 60);
+    ctx.stroke();
+
+    if (signatureImg) {
+      // Estampar la firma azul en el centro del recuadro
+      const imgAspect = signatureImg.width / signatureImg.height;
+      let drawW = sigW * 0.7;
+      let drawH = drawW / imgAspect;
+      if (drawH > sigH - 70) {
+        drawH = sigH - 70;
+        drawW = drawH * imgAspect;
+      }
+      const drawX = sigX + (sigW - drawW) / 2;
+      const drawY = sigY + (sigH - 60 - drawH) / 2 + 10;
+      ctx.drawImage(signatureImg, drawX, drawY, drawW, drawH);
+    }
+
+    ctx.fillStyle = '#000080';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Firma del Compareciente (Trazo Biométrico Táctil Azul)', sigX + sigW / 2, sigY + sigH - 25);
+    ctx.textAlign = 'start';
+
+    // 4. BLOQUE INFERIOR DESTACADO: HASH SHA-256
+    curY = sigY + sigH + 50;
+
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(90, curY, 1060, 100);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(90, curY, 1060, 100);
+
+    ctx.fillStyle = '#059669';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('HUELLA DIGITAL CRIPTOGRÁFICA Y CONSTANCIA DE INTEGRIDAD:', 110, curY + 34);
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 16px "JetBrains Mono", monospace';
+    ctx.fillText(`SHA-256: ${metadata.sha256Hash}`, 110, curY + 68);
+
+    // 5. LEYENDA LEGAL ZERO-KNOWLEDGE
+    curY += 135;
+    ctx.fillStyle = '#334155';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('• Acta legalizada generada bajo arquitectura Zero-Knowledge y computación en el cliente.', 100, curY);
+    ctx.fillText('• La firma, biometría facial y archivo fueron enlazados matemáticamente de forma inalterable.', 100, curY + 24);
+    ctx.fillText('• RHDocScan v2.5 — Validez probatoria digital y trazabilidad inmutable sin almacenamiento en servidores.', 100, curY + 48);
+
+    // Pie de página oficial
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('RHDocScan — Seguridad, Privacidad Absoluta y Cero Almacenamiento en Servidor (Client-Side Only)', 620, 1675);
+
+    return canvas.toDataURL('image/jpeg', 0.95);
+  }
+
+  // CASO A: ACTA TÉCNICA ESTÁNDAR (Solo metadatos + SHA-256)
   let curY = 245;
 
   ctx.fillStyle = '#0f172a';
@@ -280,7 +442,7 @@ export function generateAuditPageDataUrl(metadata: DocumentMetadata): string {
     'Bloque de Integridad Criptográfica:',
     `SHA-256: [${metadata.sha256Hash}]`,
     '',
-    'Certificado emitido automáticamente por el motor de visión computacional y criptografía RHDocScan v2.4.',
+    'Certificado emitido automáticamente por el motor de visión computacional y criptografía RHDocScan v2.5.',
   ];
 
   let textY = curY + 80;
