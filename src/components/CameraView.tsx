@@ -19,7 +19,7 @@ import {
   Share2,
   MessageSquare,
 } from 'lucide-react';
-import { DocumentDetector, calculateFolioQuad, sensorToScreenPoint } from '../utils/cvEngine';
+import { DocumentDetector, calculateFolioQuad, sensorToScreenPoint, findDominantDocumentQuad } from '../utils/cvEngine';
 import { playShutterSound, playFocusLockTone, triggerHaptic } from '../utils/audioFeedback';
 import { Quad, ScanMode, ScannedPage, ScanFilter, ExportFormat } from '../types';
 
@@ -235,7 +235,10 @@ export const CameraView: React.FC<CameraViewProps> = ({
 
       const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.95);
 
-      onCaptureFrame(dataUrl, currentQuadRef.current, vw, vh);
+      // Auto-ajuste de alta precisión: buscar esquinas exactas de la hoja sobre la imagen congelada
+      const autoAdjustedQuad = findDominantDocumentQuad(captureCanvas, currentQuadRef.current);
+
+      onCaptureFrame(dataUrl, autoAdjustedQuad, vw, vh);
     } catch (e) {
       console.error('Error al capturar fotograma:', e);
     } finally {

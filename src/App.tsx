@@ -405,9 +405,9 @@ export default function App() {
           </div>
 
           <div className="space-y-2">
-            <h2 className="text-2xl font-black text-white tracking-tight">¡Documento Despachado!</h2>
+            <h2 className="text-2xl font-black text-white tracking-tight">¡Documento Enviado!</h2>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Tu archivo {lastDispatchedInfo?.format || 'PDF'} ({lastDispatchedInfo?.pageCount || 1} {lastDispatchedInfo?.pageCount === 1 ? 'página' : 'páginas'}) fue procesado y compartido de forma 100% privada sin tocar servidores externos.
+              Tu archivo {lastDispatchedInfo?.format || 'PDF'} ({lastDispatchedInfo?.pageCount || 1} {lastDispatchedInfo?.pageCount === 1 ? 'página' : 'páginas'}) fue generado y enviado exitosamente de forma 100% privada sin tocar servidores externos.
             </p>
           </div>
 
@@ -420,30 +420,33 @@ export default function App() {
             </div>
           </div>
 
-          {/* Botones de acción */}
+          {/* Botones de acción ampliados (Mínimo 52px y 48px, 100% táctiles y funcionales) */}
           <div className="flex flex-col gap-3 w-full pt-2">
+            {/* Botón 1: + Iniciar Nuevo Escaneo (Primario verde, min 52px, 16px negrita) */}
             <button
               type="button"
               onClick={handleStartNewScan}
-              className="w-full py-4 px-6 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-base shadow-xl shadow-emerald-500/30 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+              className="btn-touch-primary w-full min-h-[52px] py-[14px] px-[28px] rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-base shadow-xl shadow-emerald-500/30 active:scale-95 transition flex items-center justify-center gap-2.5 cursor-pointer"
             >
               <Plus className="w-5 h-5 stroke-[2.5]" />
               <span>+ Iniciar Nuevo Escaneo</span>
             </button>
 
+            {/* Botón 2: 🔗 Compartir RHDocScan (Secundario amplio, min 48px) */}
             <button
               type="button"
               onClick={handleShareApp}
-              className="w-full py-3 px-6 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-semibold text-sm border border-white/15 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+              className="btn-touch-action w-full min-h-[48px] py-3 px-6 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-sm border border-white/15 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
             >
               <Share2 className="w-4 h-4 text-cyan-400" />
-              <span>Compartir RHDocScan</span>
+              <span>🔗 Compartir RHDocScan</span>
             </button>
 
+            {/* Botón 3: 💬 Comentarios y Sugerencias (Amplio, activo, min 48px, abre modal de inmediato) */}
             <button
               type="button"
               onClick={() => setIsFeedbackOpen(true)}
-              className="w-full py-2.5 px-4 rounded-xl text-slate-400 hover:text-white font-medium text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+              className="btn-touch-action w-full min-h-[48px] py-3 px-6 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white font-bold text-sm border border-white/10 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
             >
               <MessageSquare className="w-4 h-4 text-emerald-400" />
               <span>💬 Comentarios y Sugerencias</span>

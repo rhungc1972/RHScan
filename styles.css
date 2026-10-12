@@ -1,7 +1,7 @@
-/* styles.css - RHDocScan v2.5.0
+/* styles.css - RHDocScan v2.6.0
  * Mobile Web (PWA), iOS Safari (WebKit) & Android Ergonomics
  * Arquitectura estricta de MÁQUINA DE ESTADOS FINITOS (FSM)
- * Sin solapamiento visual. Botones táctiles de gran área (mínimo 44px - 54px).
+ * Sin solapamiento visual. Botones táctiles de gran área (mínimo 48px - 54px).
  */
 
 :root {
@@ -176,9 +176,9 @@ html, body, #root, .app-viewport {
 }
 
 .btn-touch-action {
-  min-height: 52px !important;
-  padding: 14px 28px !important;
-  font-size: 16px !important;
+  min-height: 48px !important;
+  padding: 12px 24px !important;
+  font-size: 15px !important;
   font-weight: 700 !important;
   border-radius: 16px !important;
   cursor: pointer !important;
@@ -190,10 +190,10 @@ html, body, #root, .app-viewport {
 }
 
 .btn-restart {
-  min-height: 48px !important;
-  padding: 12px 24px !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
+  min-height: 52px !important;
+  padding: 14px 28px !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
   border-radius: 16px !important;
   cursor: pointer !important;
 }

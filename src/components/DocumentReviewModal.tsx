@@ -59,13 +59,14 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [currentFormat, setCurrentFormat] = useState<ExportFormat>(exportFormat || 'pdf');
 
-  // MÓDULO 4: DOBLE CASILLA CONDICIONAL (HASH Y FIRMA + SELFIE)
+  // MÓDULO 2: CASILLAS SEPARADAS (FOTOGRAFÍA Y FIRMA TÁCTIL INDEPENDIENTES)
   const [includeMetadata, setIncludeMetadata] = useState<boolean>(false);
-  const [includeAppearance, setIncludeAppearance] = useState<boolean>(false);
+  const [includePhoto, setIncludePhoto] = useState<boolean>(false);
+  const [includeSignature, setIncludeSignature] = useState<boolean>(false);
   const [appearanceData, setAppearanceData] = useState<AppearanceData | null>(null);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState<boolean>(false);
 
-  // Menú flotante de despacho multicanal
+  // Menú flotante de método de envío multicanal
   const [showDispatchMenu, setShowDispatchMenu] = useState<boolean>(false);
   const [postSendSuccess, setPostSendSuccess] = useState<boolean>(false);
   const [successInfo, setSuccessInfo] = useState<{ fileName: string; format: string } | null>(null);
@@ -73,29 +74,46 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   const activeFormat: ExportFormat = currentFormat || exportFormat || 'pdf';
   const activePage = pages[selectedPageIndex] || pages[0];
 
-  // Alternar Casilla 1 (Principal)
+  // Alternar Casilla Principal
   const handleToggleMetadata = (checked: boolean) => {
     setIncludeMetadata(checked);
     if (!checked) {
-      setIncludeAppearance(false);
+      setIncludePhoto(false);
+      setIncludeSignature(false);
       setAppearanceData(null);
     }
   };
 
-  // Alternar Casilla 2 (Condicional)
-  const handleToggleAppearance = (checked: boolean) => {
-    setIncludeAppearance(checked);
-    if (checked && !appearanceData) {
+  // Alternar Sub-casilla A: Foto Frontal
+  const handleTogglePhoto = (checked: boolean) => {
+    setIncludePhoto(checked);
+    if (checked && (!appearanceData || !appearanceData.selfieDataUrl)) {
       setIsAppearanceModalOpen(true);
     }
   };
 
-  // Despacho del documento
+  // Alternar Sub-casilla B: Firma Táctil
+  const handleToggleSignature = (checked: boolean) => {
+    setIncludeSignature(checked);
+    if (checked && (!appearanceData || !appearanceData.signatureDataUrl)) {
+      setIsAppearanceModalOpen(true);
+    }
+  };
+
+  const getAppearanceMode = (): import('./AppearanceModal').AppearanceMode => {
+    if (includePhoto && includeSignature) return 'both';
+    if (includePhoto) return 'photo_only';
+    return 'signature_only';
+  };
+
+  // Envío del documento
   const handleExecuteDispatch = async (channel: 'whatsapp' | 'email' | 'download') => {
     if (pages.length === 0 || isGenerating) return;
 
-    // Si Casilla 2 está marcada pero aún no se capturaron los datos de comparecencia, abrir modal primero
-    if (includeAppearance && !appearanceData) {
+    // Si se marcó foto o firma pero aún no se completó la captura
+    const needsPhoto = includePhoto && (!appearanceData || !appearanceData.selfieDataUrl);
+    const needsSig = includeSignature && (!appearanceData || !appearanceData.signatureDataUrl);
+    if ((needsPhoto || needsSig)) {
       setIsAppearanceModalOpen(true);
       return;
     }
@@ -105,11 +123,20 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
     triggerHaptic(40);
 
     try {
+      const finalAppearance: AppearanceData | undefined =
+        (includePhoto || includeSignature) && appearanceData
+          ? {
+              selfieDataUrl: includePhoto ? appearanceData.selfieDataUrl : '',
+              signatureDataUrl: includeSignature ? appearanceData.signatureDataUrl : '',
+              grantorName: appearanceData.grantorName,
+            }
+          : undefined;
+
       const result = await shareOrDownloadDocument(
         pages,
         activeFormat,
         includeMetadata,
-        includeAppearance && appearanceData ? appearanceData : undefined,
+        finalAppearance,
         channel
       );
 
@@ -121,7 +148,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
       onCompleteScan();
     } catch (e: unknown) {
       const err = e as Error;
-      console.error('Error al despachar documento:', err);
+      console.error('Error al enviar documento:', err);
     } finally {
       setIsGenerating(false);
     }
@@ -203,9 +230,9 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
           </div>
 
           <div className="space-y-1">
-            <h3 className="text-xl font-bold text-white">¡Documento Despachado!</h3>
+            <h3 className="text-xl font-bold text-white">¡Documento Enviado!</h3>
             <p className="text-xs text-slate-300 max-w-xs">
-              Tu archivo <strong className="text-emerald-400">{successInfo.fileName}</strong> ha sido generado y compartido exitosamente.
+              Tu archivo <strong className="text-emerald-400">{successInfo.fileName}</strong> ha sido generado y enviado exitosamente.
             </p>
           </div>
 
@@ -213,7 +240,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             <div className="p-3.5 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2.5 max-w-xs text-left">
               <ShieldCheck className="w-5 h-5 flex-shrink-0 text-emerald-400" />
               <span>
-                {includeAppearance
+                {includePhoto || includeSignature
                   ? 'Acta de Comparecencia, Firma Digital y Hash SHA-256 incorporados.'
                   : 'Acta técnica de certificación y Hash SHA-256 adjuntados con éxito.'}
               </span>
@@ -333,12 +360,13 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
           </div>
 
           {/* ====================================================================
-              MÓDULO 4: DOBLE CASILLA CONDICIONAL (HASH Y FIRMA + SELFIE)
-              Casilla 1 (Principal): Metadatos y Hash SHA-256
-              Casilla 2 (Condicional): Comparecencia (Firma táctil y Foto frontal)
+              MÓDULO 2: CASILLAS SEPARADAS (FOTOGRAFÍA Y FIRMA TÁCTIL INDEPENDIENTES)
+              Casilla Principal: [ ] Generar constancia criptográfica y Hash (SHA-256)
+              Sub-casilla A: [ ] Incluir Fotografía Frontal del Otorgante
+              Sub-casilla B: [ ] Incluir Firma Electrónica Táctil
               ==================================================================== */}
           <div className="px-safe py-3 bg-[#0e131d] border-t border-white/5 flex flex-col gap-2.5">
-            {/* Casilla 1: Principal (Metadatos y Hash SHA-256) */}
+            {/* Casilla Principal */}
             <label className="touch-checkbox-label">
               <input
                 type="checkbox"
@@ -349,29 +377,51 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
               <div className="flex-1 flex items-center justify-between">
                 <span className="flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                  <span>Generar archivo de metadatos y Hash (SHA-256)</span>
+                  <span>Generar constancia criptográfica y Hash (SHA-256)</span>
                 </span>
               </div>
             </label>
 
-            {/* Casilla 2: Condicional y Opcional (Visible ÚNICAMENTE cuando Casilla 1 está activa) */}
+            {/* Sub-casillas independientes (Desplegadas al marcar Casilla Principal) */}
             {includeMetadata && (
-              <div className="pl-6 animate-fadeIn">
+              <div className="pl-6 flex flex-col gap-2 animate-fadeIn">
+                {/* Sub-casilla A: Fotografía Frontal */}
                 <label className="touch-checkbox-label bg-emerald-950/20 border-emerald-500/30 text-emerald-200">
                   <input
                     type="checkbox"
-                    checked={includeAppearance}
-                    onChange={(e) => handleToggleAppearance(e.target.checked)}
+                    checked={includePhoto}
+                    onChange={(e) => handleTogglePhoto(e.target.checked)}
                     className="touch-checkbox"
                   />
                   <div className="flex-1 flex items-center justify-between">
                     <span className="flex items-center gap-2 text-xs font-semibold">
-                      <UserCheck className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                      <span>Incluir comparecencia (Firma táctil y Foto frontal del otorgante)</span>
+                      <Camera className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                      <span>Incluir Fotografía Frontal del Otorgante</span>
                     </span>
-                    {appearanceData && (
+                    {appearanceData?.selfieDataUrl && (
                       <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded-full font-black">
-                        ✓ Lista
+                        ✓ Foto Lista
+                      </span>
+                    )}
+                  </div>
+                </label>
+
+                {/* Sub-casilla B: Firma Electrónica Táctil */}
+                <label className="touch-checkbox-label bg-emerald-950/20 border-emerald-500/30 text-emerald-200">
+                  <input
+                    type="checkbox"
+                    checked={includeSignature}
+                    onChange={(e) => handleToggleSignature(e.target.checked)}
+                    className="touch-checkbox"
+                  />
+                  <div className="flex-1 flex items-center justify-between">
+                    <span className="flex items-center gap-2 text-xs font-semibold">
+                      <UserCheck className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+                      <span>Incluir Firma Electrónica Táctil</span>
+                    </span>
+                    {appearanceData?.signatureDataUrl && (
+                      <span className="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded-full font-black">
+                        ✓ Firma Lista
                       </span>
                     )}
                   </div>
@@ -381,7 +431,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
           </div>
 
           {/* ====================================================================
-              MÓDULO 6: MENÚ DE ENVÍO MULTICANAL (WHATSAPP, CORREO, DESCARGA)
+              MÓDULO 4: MENÚ DE ENVÍO MULTICANAL (WHATSAPP, CORREO, DESCARGA)
               ==================================================================== */}
           <div className="pb-safe px-safe pt-3 pb-4 bg-[#0a0f18] border-t border-white/10 flex flex-col gap-2 z-20">
             {!showDispatchMenu ? (
@@ -407,7 +457,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
               /* MENÚ MULTICANAL ABIERTO CON 3 BOTONES TÁCTILES GRANDES */
               <div className="flex flex-col gap-2.5 animate-scaleUp">
                 <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
-                  <span className="font-bold text-white">Selecciona método de despacho:</span>
+                  <span className="font-bold text-white">Método de Envío:</span>
                   <button
                     type="button"
                     onClick={() => setShowDispatchMenu(false)}
@@ -455,14 +505,22 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
       {/* MODAL DE COMPARECENCIA DIGITAL (PASO A: FOTO, PASO B: FIRMA) */}
       {isAppearanceModalOpen && (
         <AppearanceModal
+          mode={getAppearanceMode()}
           onClose={() => {
             setIsAppearanceModalOpen(false);
-            if (!appearanceData) {
-              setIncludeAppearance(false);
+            if (!appearanceData?.selfieDataUrl) {
+              setIncludePhoto(false);
+            }
+            if (!appearanceData?.signatureDataUrl) {
+              setIncludeSignature(false);
             }
           }}
           onConfirm={(data) => {
-            setAppearanceData(data);
+            setAppearanceData((prev) => ({
+              selfieDataUrl: data.selfieDataUrl || prev?.selfieDataUrl || '',
+              signatureDataUrl: data.signatureDataUrl || prev?.signatureDataUrl || '',
+              grantorName: data.grantorName || prev?.grantorName,
+            }));
             setIsAppearanceModalOpen(false);
           }}
         />

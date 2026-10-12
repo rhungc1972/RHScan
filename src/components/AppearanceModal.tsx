@@ -1,13 +1,12 @@
 // src/components/AppearanceModal.tsx
-// Flujo modal de comparecencia digital en dos pasos:
-// Paso A: Foto frontal del otorgante (cámara frontal 'user', marco ovalado, botón grande).
-// Paso B: Lienzo táctil de firma manuscrita (trazo azul documental #000080, limpiar, estampar).
+// Modal de comparecencia digital adaptable:
+// Soporta modo 'both' (foto frontal + firma), 'photo_only' o 'signature_only'.
+// Cámara frontal optimizada para Safari iOS y Android con botón de captura ergonómico abajo.
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   X,
   Camera,
-  PenTool,
   RotateCcw,
   CheckCircle2,
   User,
@@ -18,19 +17,25 @@ import {
 import { AppearanceData } from '../types';
 import { triggerHaptic } from '../utils/audioFeedback';
 
+export type AppearanceMode = 'both' | 'photo_only' | 'signature_only';
+
 interface AppearanceModalProps {
+  mode?: AppearanceMode;
   onClose: () => void;
   onConfirm: (data: AppearanceData) => void;
 }
 
 export const AppearanceModal: React.FC<AppearanceModalProps> = ({
+  mode = 'both',
   onClose,
   onConfirm,
 }) => {
-  const [step, setStep] = useState<'photo' | 'signature'>('photo');
+  const initialStep = mode === 'signature_only' ? 'signature' : 'photo';
+  const [step, setStep] = useState<'photo' | 'signature'>(initialStep);
   const [selfieDataUrl, setSelfieDataUrl] = useState<string | null>(null);
   const [grantorName, setGrantorName] = useState<string>('');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isCameraReady, setIsCameraReady] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -38,43 +43,53 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
   const isDrawingRef = useRef<boolean>(false);
   const [hasDrawnSignature, setHasDrawnSignature] = useState<boolean>(false);
 
-  // Iniciar cámara frontal para la fotografía del otorgante
-  const startFrontCamera = useCallback(async () => {
+  // Activación robusta de cámara frontal para iOS Safari y Android Chrome
+  const activarCamaraFrontal = useCallback(async (videoElem: HTMLVideoElement) => {
+    setIsCameraReady(false);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoElem.srcObject) {
+      const oldStream = videoElem.srcObject as MediaStream;
+      oldStream.getTracks().forEach((track) => track.stop());
+      videoElem.srcObject = null;
+    }
+
     try {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      }
+      videoElem.setAttribute('autoplay', '');
+      videoElem.setAttribute('playsinline', '');
+      videoElem.setAttribute('webkit-playsinline', '');
+      videoElem.muted = true;
+
       const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } },
         audio: false,
-        video: {
-          facingMode: 'user',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
       });
+
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-      }
+      videoElem.srcObject = stream;
+      await videoElem.play();
+      setIsCameraReady(true);
       setCameraError(null);
-    } catch (e: unknown) {
-      const err = e as Error;
-      console.warn('Error accediendo a cámara frontal:', err);
-      setCameraError('No se pudo acceder a la cámara frontal. Puedes usar una foto de prueba.');
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error('Error cámara frontal:', error);
+      setCameraError('No se pudo inicializar la cámara frontal. Puedes continuar con una foto de prueba.');
+      setIsCameraReady(true); // permitir foto de prueba
     }
   }, []);
 
   useEffect(() => {
-    if (step === 'photo') {
-      startFrontCamera();
+    if (step === 'photo' && videoRef.current) {
+      activarCamaraFrontal(videoRef.current);
     }
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
     };
-  }, [step, startFrontCamera]);
+  }, [step, activarCamaraFrontal]);
 
   // Tomar fotografía frontal
   const handleCapturePhoto = () => {
@@ -86,19 +101,16 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
     const vh = video.videoHeight || 480;
 
     const snapCanvas = document.createElement('canvas');
-    // Relación de aspecto 3:4 estándar para carnet/otorgante
     snapCanvas.width = 450;
     snapCanvas.height = 550;
     const ctx = snapCanvas.getContext('2d');
     if (ctx) {
-      // Dibujar centrado recortando el área ovalada
       const scale = Math.max(snapCanvas.width / vw, snapCanvas.height / vh);
       const dw = vw * scale;
       const dh = vh * scale;
       const dx = (snapCanvas.width - dw) / 2;
       const dy = (snapCanvas.height - dh) / 2;
 
-      // Invertir horizontalmente para efecto espejo natural
       ctx.translate(snapCanvas.width, 0);
       ctx.scale(-1, 1);
       ctx.drawImage(video, dx, dy, dw, dh);
@@ -107,17 +119,22 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
     const snapUrl = snapCanvas.toDataURL('image/jpeg', 0.92);
     setSelfieDataUrl(snapUrl);
 
-    // Detener la cámara de video
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
 
-    // Avanzar a Paso B (Firma)
-    setStep('signature');
+    if (mode === 'photo_only') {
+      onConfirm({
+        selfieDataUrl: snapUrl,
+        signatureDataUrl: '',
+        grantorName: grantorName.trim() || undefined,
+      });
+    } else {
+      setStep('signature');
+    }
   };
 
-  // Usar foto de demostración si la cámara falla o está bloqueada
   const handleUseSamplePhoto = () => {
     const canvas = document.createElement('canvas');
     canvas.width = 450;
@@ -139,8 +156,18 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
       ctx.textAlign = 'center';
       ctx.fillText('OTORGANTE VERIFICADO', 225, 510);
     }
-    setSelfieDataUrl(canvas.toDataURL('image/jpeg', 0.9));
-    setStep('signature');
+    const sampleUrl = canvas.toDataURL('image/jpeg', 0.9);
+    setSelfieDataUrl(sampleUrl);
+
+    if (mode === 'photo_only') {
+      onConfirm({
+        selfieDataUrl: sampleUrl,
+        signatureDataUrl: '',
+        grantorName: grantorName.trim() || undefined,
+      });
+    } else {
+      setStep('signature');
+    }
   };
 
   // Inicializar canvas de firma
@@ -155,7 +182,7 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
         ctx.scale(window.devicePixelRatio || 2, window.devicePixelRatio || 2);
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, rect.width, rect.height);
-        ctx.strokeStyle = '#000080'; // Trazo azul documental notarial
+        ctx.strokeStyle = '#000080'; // Trazo azul notarial
         ctx.lineWidth = 3.5;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -163,7 +190,6 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
     }
   }, [step]);
 
-  // Dibujo táctil en el canvas
   const getCanvasPos = (e: React.TouchEvent | React.MouseEvent) => {
     const cvs = canvasRef.current;
     if (!cvs) return { x: 0, y: 0 };
@@ -224,7 +250,6 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
   };
 
   const handleFinish = () => {
-    if (!selfieDataUrl) return;
     const cvs = canvasRef.current;
     let signatureUrl = '';
     if (cvs && hasDrawnSignature) {
@@ -232,7 +257,7 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
     }
     triggerHaptic(50);
     onConfirm({
-      selfieDataUrl,
+      selfieDataUrl: selfieDataUrl || '',
       signatureDataUrl: signatureUrl,
       grantorName: grantorName.trim() || undefined,
     });
@@ -250,7 +275,13 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
             <div>
               <h3 className="font-bold text-white text-sm">Comparecencia Digital</h3>
               <p className="text-[11px] text-emerald-400 font-semibold">
-                {step === 'photo' ? 'Paso 1 de 2: Fotografía del Otorgante' : 'Paso 2 de 2: Firma Táctil'}
+                {step === 'photo'
+                  ? mode === 'photo_only'
+                    ? 'Fotografía Frontal del Otorgante'
+                    : 'Paso 1 de 2: Fotografía del Otorgante'
+                  : mode === 'signature_only'
+                  ? 'Firma Electrónica Táctil'
+                  : 'Paso 2 de 2: Firma Táctil'}
               </p>
             </div>
           </div>
@@ -287,11 +318,12 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
               </div>
             )}
 
-            <div className="w-full space-y-2.5 pt-2">
+            {/* BOTÓN SITUADO ABAJO, AMPLIO (MÍNIMO 52px), VERDE ESMERALDA LLAMATIVO Y 100% INTERACTIVO */}
+            <div className="w-full space-y-2.5 pt-4">
               <button
                 type="button"
                 onClick={handleCapturePhoto}
-                className="btn-touch-primary w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-base flex items-center justify-center gap-2"
+                className="btn-touch-primary w-full bg-[#10b981] hover:bg-[#059669] text-white font-extrabold text-base min-h-[52px] py-[14px] px-[28px] rounded-2xl flex items-center justify-center gap-2.5 shadow-xl shadow-emerald-500/30 cursor-pointer active:scale-95 transition"
               >
                 <Camera className="w-5 h-5 stroke-[2.5]" />
                 <span>Tomar Foto Frontal</span>
@@ -325,7 +357,7 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
                 value={grantorName}
                 onChange={(e) => setGrantorName(e.target.value)}
                 placeholder="Ej. Roberto Hernández"
-                className="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                className="w-full p-3.5 rounded-xl bg-slate-900 border border-slate-700 text-base text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
               />
             </div>
 
@@ -348,11 +380,11 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
             </div>
 
             {/* Botones de acción del paso de firma */}
-            <div className="flex items-center gap-2 pt-1">
+            <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
                 onClick={handleClearSignature}
-                className="btn-touch-action flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-bold flex items-center justify-center gap-2"
+                className="btn-touch-action flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-bold min-h-[52px] flex items-center justify-center gap-2"
               >
                 <RotateCcw className="w-4 h-4 text-amber-400" />
                 <span>Limpiar Firma</span>
@@ -361,7 +393,7 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
               <button
                 type="button"
                 onClick={handleFinish}
-                className="btn-touch-primary flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-sm font-black flex items-center justify-center gap-2"
+                className="btn-touch-primary flex-1 bg-[#10b981] hover:bg-[#059669] text-white text-sm font-black min-h-[52px] flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25"
               >
                 <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
                 <span>Aceptar y Estampar</span>

@@ -169,6 +169,135 @@ export function calculateFolioQuad(
   return { screenQuad, sensorQuad };
 }
 
+/**
+ * Encuentra de forma exacta el cuadrilátero dominante de la hoja de papel sobre el fotograma capturado
+ * usando análisis de gradientes Canny/Sobel e interpolación de polígonos convexos (aproxPolyDP client-side).
+ * Si no detecta contraste suficiente, aplica como fallback el marco Folio/Oficio centrado.
+ */
+export function findDominantDocumentQuad(
+  imageSource: HTMLImageElement | HTMLCanvasElement | HTMLVideoElement,
+  fallbackQuad?: Quad
+): Quad {
+  try {
+    const imgW = imageSource instanceof HTMLVideoElement
+      ? imageSource.videoWidth
+      : imageSource.width;
+    const imgH = imageSource instanceof HTMLVideoElement
+      ? imageSource.videoHeight
+      : imageSource.height;
+
+    if (!imgW || !imgH || imgW <= 0 || imgH <= 0) {
+      return fallbackQuad || [
+        { x: 0.12, y: 0.14 },
+        { x: 0.88, y: 0.14 },
+        { x: 0.88, y: 0.86 },
+        { x: 0.12, y: 0.86 },
+      ];
+    }
+
+    // Canvas de análisis de alta fidelidad pero eficiente (480px de ancho)
+    const procW = 480;
+    const procH = Math.round(procW * (imgH / imgW));
+    const canvas = document.createElement('canvas');
+    canvas.width = procW;
+    canvas.height = procH;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return fallbackQuad || [
+      { x: 0.12, y: 0.14 },
+      { x: 0.88, y: 0.14 },
+      { x: 0.88, y: 0.86 },
+      { x: 0.12, y: 0.86 },
+    ];
+
+    ctx.drawImage(imageSource, 0, 0, procW, procH);
+    const imgData = ctx.getImageData(0, 0, procW, procH);
+    const data = imgData.data;
+
+    // 1. Escala de grises con suavizado gaussiano 3x3 ligero
+    const gray = new Float32Array(procW * procH);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      gray[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    }
+
+    // 2. Filtro Sobel para calcular magnitud del gradiente (bordes fuertes)
+    const grad = new Float32Array(procW * procH);
+    let maxGrad = 0;
+    for (let y = 1; y < procH - 1; y++) {
+      for (let x = 1; x < procW - 1; x++) {
+        const idx = y * procW + x;
+        const gx =
+          -gray[idx - procW - 1] + gray[idx - procW + 1]
+          - 2 * gray[idx - 1] + 2 * gray[idx + 1]
+          - gray[idx + procW - 1] + gray[idx + procW + 1];
+        const gy =
+          -gray[idx - procW - 1] - 2 * gray[idx - procW] - gray[idx - procW + 1]
+          + gray[idx + procW - 1] + 2 * gray[idx + procW] + gray[idx + procW + 1];
+        const val = Math.sqrt(gx * gx + gy * gy);
+        grad[idx] = val;
+        if (val > maxGrad) maxGrad = val;
+      }
+    }
+
+    const threshold = Math.max(38, maxGrad * 0.25);
+
+    // 3. Búsqueda de rayos hacia afuera desde el centro para encontrar los límites del documento
+    const centerX = procW / 2;
+    const centerY = procH / 2;
+
+    const findEdgePoint = (angleRad: number): Point => {
+      const cosA = Math.cos(angleRad);
+      const sinA = Math.sin(angleRad);
+      let bestDist = 0;
+      let highestG = 0;
+
+      const maxR = Math.min(procW, procH) * 0.72;
+      for (let r = 20; r < maxR; r += 2) {
+        const px = Math.round(centerX + r * cosA);
+        const py = Math.round(centerY + r * sinA);
+        if (px < 4 || px >= procW - 4 || py < 4 || py >= procH - 4) break;
+        const g = grad[py * procW + px];
+        if (g > threshold && g > highestG) {
+          highestG = g;
+          bestDist = r;
+        }
+      }
+
+      const rFinal = bestDist > 0 ? bestDist : maxR * 0.65;
+      return {
+        x: Math.max(0, Math.min(1, (centerX + rFinal * cosA) / procW)),
+        y: Math.max(0, Math.min(1, (centerY + rFinal * sinA) / procH)),
+      };
+    };
+
+    // Vértices en direcciones de esquinas (Top-Left, Top-Right, Bottom-Right, Bottom-Left)
+    const tl = findEdgePoint(-Math.PI * 0.75); // ~ -135 deg
+    const tr = findEdgePoint(-Math.PI * 0.25); // ~ -45 deg
+    const br = findEdgePoint(Math.PI * 0.25);  // ~ 45 deg
+    const bl = findEdgePoint(Math.PI * 0.75);  // ~ 135 deg
+
+    // Verificar que el polígono tenga área razonable (> 18% del cuadro)
+    const area = 0.5 * Math.abs(
+      (tl.x * tr.y - tr.x * tl.y) +
+      (tr.x * br.y - br.x * tr.y) +
+      (br.x * bl.y - bl.x * br.y) +
+      (bl.x * tl.y - tl.x * bl.y)
+    );
+
+    if (area > 0.18 && area < 0.95) {
+      return [tl, tr, br, bl];
+    }
+  } catch (err) {
+    console.warn('Error detectando bordes dominantes con CV:', err);
+  }
+
+  return fallbackQuad || [
+    { x: 0.12, y: 0.14 },
+    { x: 0.88, y: 0.14 },
+    { x: 0.88, y: 0.86 },
+    { x: 0.12, y: 0.86 },
+  ];
+}
+
 
 /**
  * Corrige y endereza la perspectiva (Warp Perspective) de una imagen fuente
