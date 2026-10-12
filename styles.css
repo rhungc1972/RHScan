@@ -1,12 +1,12 @@
-/* styles.css - RHDocScan v2.6.0
+/* styles.css - RHDocScan v2.7.0
  * Mobile Web (PWA), iOS Safari (WebKit) & Android Ergonomics
  * Arquitectura estricta de MÁQUINA DE ESTADOS FINITOS (FSM)
- * Sin solapamiento visual. Botones táctiles de gran área (mínimo 48px - 54px).
+ * Cero solapamiento visual. Botones táctiles de gran área (mínimo 48px - 54px).
  */
 
 :root {
   --sat: env(safe-area-inset-top, 0px);
-  --sab: env(safe-area-inset-bottom, 0px);
+  --sab: env(safe-area-inset-bottom, 20px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
   --brand-emerald: #10b981;
@@ -14,7 +14,7 @@
   --brand-cyan: #38bdf8;
   --brand-navy: #000080;
   --bg-dark: #0a0f18;
-  --panel-bg: rgba(15, 23, 42, 0.88);
+  --panel-bg: rgba(15, 23, 42, 0.92);
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -119,144 +119,226 @@ html, body, #root, .app-viewport {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: translateZ(0);
 }
 
-.hud-canvas {
+.camera-hud-canvas {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 15;
-}
-
-.emerald-active {
-  color: #10b981 !important;
-  border-color: #10b981 !important;
-  box-shadow: 0 0 25px rgba(16, 185, 129, 0.4) !important;
 }
 
 /* ==========================================================================
-   3. ERGONOMÍA TÁCTIL (TOUCH-FRIENDLY) - BOTONES DE GRAN ÁREA
+   3. PANTALLA DE RECORTE (#screen-crop): MANEJADORES VERDES Y SIN SOLAPAMIENTO
    ========================================================================== */
 
-.btn-header-action {
-  min-height: 44px !important;
-  padding: 8px 16px !important;
-  font-size: 13px !important;
+.crop-container {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #000000;
+  touch-action: none;
+}
+
+.crop-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* 4 Vértices táctiles circulares verdes esmeralda (#10b981) */
+.crop-handle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  margin-left: -22px;
+  margin-top: -22px;
+  border-radius: 50%;
+  background-color: #10b981;
+  border: 3.5px solid #ffffff;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.7), 0 4px 10px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+  touch-action: none;
+  z-index: 45;
+  transition: transform 0.08s ease;
+}
+
+.crop-handle:active {
+  cursor: grabbing;
+  transform: scale(1.25);
+  background-color: #34d399;
+}
+
+/* ==========================================================================
+   4. ERGONOMÍA TÁCTIL: BOTONES AMPLIOS TOUCH-FRIENDLY (MÍNIMO 52px)
+   ========================================================================== */
+
+.btn-touch-action,
+.btn-touch-primary,
+.btn-restart {
+  min-height: 52px !important;
+  height: auto !important;
+  padding: 14px 24px !important;
+  font-size: 16px !important;
   font-weight: 700 !important;
-  border-radius: 9999px !important;
+  border-radius: 16px !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 6px !important;
+  gap: 10px !important;
   cursor: pointer !important;
   touch-action: manipulation !important;
-  transition: transform 0.15s ease, background-color 0.15s ease !important;
-}
-.btn-header-action:active {
-  transform: scale(0.96) !important;
+  transition: transform 0.1s ease, background-color 0.15s ease, opacity 0.15s ease !important;
+  text-decoration: none !important;
+  box-sizing: border-box !important;
 }
 
 .btn-touch-primary {
-  min-height: 52px !important;
-  padding: 14px 28px !important;
-  font-size: 16px !important;
-  font-weight: 800 !important;
-  border-radius: 16px !important;
-  letter-spacing: -0.01em !important;
-  cursor: pointer !important;
-  touch-action: manipulation !important;
-  box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.35) !important;
-  transition: transform 0.15s ease, opacity 0.15s ease !important;
+  background-color: var(--brand-emerald) !important;
+  color: #022c22 !important;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3) !important;
+  border: none !important;
 }
+
 .btn-touch-primary:active {
   transform: scale(0.97) !important;
+  background-color: var(--brand-emerald-dark) !important;
 }
 
 .btn-touch-action {
-  min-height: 48px !important;
-  padding: 12px 24px !important;
-  font-size: 15px !important;
-  font-weight: 700 !important;
-  border-radius: 16px !important;
-  cursor: pointer !important;
-  touch-action: manipulation !important;
-  transition: transform 0.15s ease, opacity 0.15s ease !important;
-}
-.btn-touch-action:active {
-  transform: scale(0.97) !important;
+  background-color: rgba(30, 41, 59, 0.9) !important;
+  color: #f8fafc !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
 }
 
-.btn-restart {
-  min-height: 52px !important;
-  padding: 14px 28px !important;
-  font-size: 16px !important;
-  font-weight: 800 !important;
-  border-radius: 16px !important;
+.btn-touch-action:active {
+  transform: scale(0.97) !important;
+  background-color: rgba(51, 65, 85, 0.9) !important;
+}
+
+.btn-header-feedback {
+  min-height: 44px !important;
+  padding: 8px 16px !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  border-radius: 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
   cursor: pointer !important;
+  touch-action: manipulation !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  color: #34d399 !important;
+  transition: transform 0.1s ease !important;
+}
+.btn-header-feedback:active {
+  transform: scale(0.95) !important;
+}
+
+/* Obturador central de la cámara (72x72px ergonómico) */
+.btn-shutter {
+  width: 72px !important;
+  height: 72px !important;
+  min-width: 72px !important;
+  min-height: 72px !important;
+  border-radius: 50% !important;
+  background-color: #ffffff !important;
+  border: 4px solid #10b981 !important;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.35), 0 10px 25px rgba(0, 0, 0, 0.6) !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
+  position: relative !important;
+  transition: transform 0.12s ease !important;
+}
+
+.btn-shutter:active {
+  transform: scale(0.91) !important;
+  background-color: #e2e8f0 !important;
+}
+
+.btn-shutter::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.15);
 }
 
 /* ==========================================================================
-   4. CARRUSEL HORIZONTAL Y TARJETA VERDE A LA DERECHA
+   5. CARRUSEL HORIZONTAL Y BOTÓN VERDE A LA DERECHA
    ========================================================================== */
 
 .gallery-carousel {
-  overflow-x: auto !important;
-  overflow-y: hidden !important;
   display: flex !important;
   flex-direction: row !important;
   align-items: center !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
   gap: 14px !important;
   padding: 16px !important;
-  -webkit-overflow-scrolling: touch !important;
   scroll-behavior: smooth !important;
+  -webkit-overflow-scrolling: touch !important;
+  scrollbar-width: none !important;
+}
+
+.gallery-carousel::-webkit-scrollbar {
+  display: none !important;
 }
 
 .gallery-card {
   position: relative !important;
-  flex-shrink: 0 !important;
+  flex: 0 0 auto !important;
   width: 90px !important;
   height: 125px !important;
   border-radius: 14px !important;
   overflow: hidden !important;
-  border: 2px solid rgba(255, 255, 255, 0.12) !important;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5) !important;
-  background-color: #000 !important;
+  border: 2px solid rgba(255, 255, 255, 0.15) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+  cursor: pointer !important;
+  touch-action: manipulation !important;
+  transition: transform 0.15s ease, border-color 0.15s ease !important;
 }
 
 .gallery-card.selected {
   border-color: #10b981 !important;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4), 0 8px 24px rgba(0, 0, 0, 0.7) !important;
-  transform: scale(1.04) !important;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.5) !important;
+  transform: translateY(-2px) !important;
 }
 
 .gallery-delete-btn {
   position: absolute !important;
-  top: 6px !important;
-  right: 6px !important;
+  top: 5px !important;
+  right: 5px !important;
   width: 28px !important;
   height: 28px !important;
   border-radius: 50% !important;
-  background-color: rgba(220, 38, 38, 0.9) !important;
+  background-color: rgba(220, 38, 38, 0.92) !important;
   color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  border: 1.5px solid rgba(255, 255, 255, 0.8) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6) !important;
   cursor: pointer !important;
-  z-index: 10 !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4) !important;
   touch-action: manipulation !important;
+  z-index: 5 !important;
 }
 .gallery-delete-btn:active {
   transform: scale(0.9) !important;
 }
 
 .gallery-add-card {
-  flex-shrink: 0 !important;
-  width: 110px !important;
+  position: relative !important;
+  flex: 0 0 auto !important;
+  width: 96px !important;
   height: 125px !important;
   border-radius: 14px !important;
   background: linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(6, 182, 212, 0.18) 100%) !important;
@@ -279,7 +361,7 @@ html, body, #root, .app-viewport {
 }
 
 /* ==========================================================================
-   5. CASILLAS AMPLIADAS (CHECKBOX 24x24px)
+   6. CASILLAS AMPLIADAS (CHECKBOX 24x24px)
    ========================================================================== */
 
 .touch-checkbox-label {
@@ -310,8 +392,36 @@ html, body, #root, .app-viewport {
 }
 
 /* ==========================================================================
-   6. VISORES Y CANVAS DE COMPARECENCIA (SELFIE OVALADA & FIRMA TÁCTIL)
+   7. MODAL DE CÁMARA FRONTAL Y SELFIE (#modal-selfie)
    ========================================================================== */
+
+.modal-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10000 !important;
+  background-color: rgba(0, 0, 0, 0.88) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 16px !important;
+}
+
+.modal-content {
+  width: 100% !important;
+  max-width: 420px !important;
+  border-radius: 28px !important;
+  background: var(--panel-bg) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7) !important;
+  padding: 24px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 16px !important;
+  max-height: 92dvh !important;
+  overflow-y: auto !important;
+}
 
 .oval-face-guide {
   position: relative;
@@ -321,6 +431,7 @@ html, body, #root, .app-viewport {
   border: 3.5px dashed #10b981;
   box-shadow: 0 0 0 9999px rgba(10, 15, 24, 0.75), 0 0 30px rgba(16, 185, 129, 0.4);
   overflow: hidden;
+  margin: 0 auto;
 }
 
 .signature-canvas {
@@ -334,7 +445,7 @@ html, body, #root, .app-viewport {
 }
 
 /* ==========================================================================
-   7. INPUTS ANTI-ZOOM SAFARI iOS (FONT-SIZE: 16px MÍNIMO)
+   8. INPUTS ANTI-ZOOM SAFARI iOS (FONT-SIZE: 16px MÍNIMO)
    ========================================================================== */
 
 input[type="text"],
@@ -342,16 +453,16 @@ input[type="email"],
 input[type="password"],
 textarea,
 select {
-  font-size: 16px !important; /* Evita que Safari iOS haga zoom automático */
+  font-size: 16px !important;
   -webkit-text-size-adjust: 100% !important;
 }
 
 /* ==========================================================================
-   8. UTILIDADES Y SAFE AREAS
+   9. UTILIDADES Y SAFE AREAS
    ========================================================================== */
 
 .pt-safe { padding-top: max(12px, var(--sat)); }
-.pb-safe { padding-bottom: max(12px, var(--sab)); }
+.pb-safe { padding-bottom: max(16px, var(--sab)); }
 .px-safe { padding-left: max(16px, var(--sal)); padding-right: max(16px, var(--sar)); }
 
 .glass-panel {

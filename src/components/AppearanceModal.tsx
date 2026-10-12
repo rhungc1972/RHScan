@@ -46,6 +46,12 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
   // Activación robusta de cámara frontal para iOS Safari y Android Chrome
   const activarCamaraFrontal = useCallback(async (videoElem: HTMLVideoElement) => {
     setIsCameraReady(false);
+    // 1. Detener de forma determinista cualquier flujo activo previo (cámara trasera)
+    const win = window as unknown as { activeStream?: MediaStream | null };
+    if (win.activeStream) {
+      win.activeStream.getTracks().forEach((track) => track.stop());
+      win.activeStream = null;
+    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -67,6 +73,7 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
         audio: false,
       });
 
+      win.activeStream = stream;
       streamRef.current = stream;
       videoElem.srcObject = stream;
       await videoElem.play();
@@ -85,8 +92,14 @@ export const AppearanceModal: React.FC<AppearanceModalProps> = ({
       activarCamaraFrontal(videoRef.current);
     }
     return () => {
+      const win = window as unknown as { activeStream?: MediaStream | null };
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (win.activeStream) {
+        win.activeStream.getTracks().forEach((t) => t.stop());
+        win.activeStream = null;
       }
     };
   }, [step, activarCamaraFrontal]);

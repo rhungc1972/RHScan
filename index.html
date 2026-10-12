@@ -4,50 +4,227 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>RHDocScan - Escáner Móvil Privado</title>
-    <meta name="description" content="RHDocScan: Escáner móvil PWA con marco Folio/Oficio, visión por computadora en vivo (60 FPS), auto-ajuste esmeralda, certificación criptográfica SHA-256 y acta de comparecencia digital 100% Zero-Knowledge." />
-    
+    <meta name="description" content="RHDocScan: Escáner móvil PWA con auto-ajuste exacto de marco verde esmeralda con OpenCV, cámara frontal para comparecencias notariales, certificación criptográfica SHA-256 y arquitectura Zero-Knowledge." />
+
     <!-- Open Graph / Social -->
     <meta property="og:title" content="RHDocScan - Escáner Móvil Privado" />
-    <meta property="og:description" content="RHDocScan: Escáner móvil PWA con marco Folio/Oficio y visión por computadora local." />
+    <meta property="og:description" content="Escáner móvil PWA con marco Folio/Oficio y visión por computadora local." />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="/pwa-512x512.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="RHDocScan - Escáner Móvil Privado" />
-    <meta name="twitter:description" content="RHDocScan: Escáner móvil PWA con arquitectura FSM y procesamiento 100% local." />
 
-    <!-- PWA & Mobile Capabilities -->
+    <!-- PWA Settings -->
     <meta name="theme-color" content="#0a0f18" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="RHDocScan" />
-    <meta name="format-detection" content="telephone=no" />
-    
-    <!-- Favicons & Icons -->
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="alternate icon" href="/pwa-192x192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
-    
-    <!-- Global Styles & Safari Ergonomics -->
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+
+    <!-- OpenCV.js para Visión por Computadora en el Navegador -->
+    <script async src="https://docs.opencv.org/4.7.0/opencv.js" onload="window.cvReady = true; console.log('OpenCV.js listo');"></script>
+
+    <!-- Estilos Globales -->
     <link rel="stylesheet" href="/styles.css" />
   </head>
-  <body class="bg-[#0a0f18] text-slate-100 antialiased select-none overflow-hidden touch-none font-sans app-viewport" style="height: 100dvh; min-height: -webkit-fill-available;" data-screen="screen-camera">
-    <!-- Contenedor Raíz de la Aplicación (Máquina de Estados Finitos) -->
-    <div id="root" style="height: 100dvh; min-height: -webkit-fill-available;">
-      <!-- ESTADO 1: CÁMARA (Activo por defecto) -->
-      <div id="screen-camera" class="screen-state screen-active"></div>
-      <!-- ESTADO 2: RECORTE Y CONFIRMACIÓN -->
-      <div id="screen-crop" class="screen-state screen-hidden" style="display: none !important;"></div>
-      <!-- ESTADO 3: GALERÍA DE PÁGINAS ACUMULADAS -->
-      <div id="screen-gallery" class="screen-state screen-hidden" style="display: none !important;"></div>
-      <!-- ESTADO 4: ÉXITO / POST-DESPACHO -->
-      <div id="screen-success" class="screen-state screen-hidden" style="display: none !important;"></div>
+  <body class="bg-[#0a0f18] text-slate-100 antialiased overflow-hidden select-none" data-screen="screen-camera">
+    
+    <!-- CONTENEDOR REACT (Vite Single Page Application) -->
+    <div id="root" style="width: 100%; height: 100dvh; min-height: -webkit-fill-available;"></div>
+
+    <!-- CONTENEDOR FSM CLIENT-SIDE INDEPENDIENTE (Fallback Estático para Netlify) -->
+    <div id="standalone-fsm-container" style="display: none;">
+      <!-- ESTADO 1: CÁMARA (#screen-camera) -->
+      <div id="screen-camera" class="screen-state screen-active">
+        <div class="camera-preview-container">
+          <video id="camera-video" class="camera-video" playsinline muted autoplay></video>
+          <canvas id="camera-hud-canvas" class="camera-hud-canvas"></canvas>
+        </div>
+        <!-- Barra superior -->
+        <div class="pt-safe px-safe py-3 flex items-center justify-between glass-panel z-20 absolute top-0 inset-x-0">
+          <button id="btn-header-logo" type="button" class="flex items-center gap-2 cursor-pointer">
+            <span class="w-9 h-9 rounded-xl bg-emerald-500 text-slate-950 font-black flex items-center justify-center text-sm shadow-md">RH</span>
+            <span class="font-extrabold text-white text-base tracking-wide">RHDocScan</span>
+          </button>
+          <button type="button" class="btn-header-feedback" onclick="openFeedbackModal()">
+            💬 Observaciones
+          </button>
+        </div>
+        <!-- Obturador inferior -->
+        <div class="pb-safe px-safe py-4 flex items-center justify-center absolute bottom-0 inset-x-0 z-20">
+          <button id="btn-shutter" type="button" class="btn-shutter" onclick="captureAndOpenCrop()"></button>
+        </div>
+      </div>
+
+      <!-- ESTADO 2: RECORTE Y CONFIRMACIÓN (#screen-crop) -->
+      <div id="screen-crop" class="screen-state screen-hidden" style="display: none !important;">
+        <div class="pt-safe px-safe py-3 flex items-center justify-center glass-panel z-20 absolute top-0 inset-x-0">
+          <span class="text-sm font-bold text-white">Ajuste de Esquinas Documentales</span>
+        </div>
+        <div id="crop-canvas-container" class="crop-container">
+          <canvas id="crop-canvas" class="crop-canvas"></canvas>
+        </div>
+        <!-- ÚNICAMENTE DOS BOTONES GRANDES (Mínimo 52px) -->
+        <div class="pb-safe px-safe pt-3 pb-4 bg-[#0c0f14] border-t border-white/10 flex items-center justify-between gap-3 z-20 absolute bottom-0 inset-x-0">
+          <button id="btn-crop-cancel" type="button" class="btn-touch-action flex-1" onclick="cancelCropAndRetry()">
+            <span>🔄 Repetir foto</span>
+          </button>
+          <button id="btn-crop-confirm" type="button" class="btn-touch-primary flex-1" onclick="confirmCropAndContinue()">
+            <span>Continuar ➔</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ESTADO 3: GALERÍA DE PÁGINAS ACUMULADAS (#screen-gallery) -->
+      <div id="screen-gallery" class="screen-state screen-hidden" style="display: none !important;">
+        <div class="pt-safe px-safe py-3 flex items-center justify-between glass-panel z-20 absolute top-0 inset-x-0">
+          <button type="button" class="text-xs text-slate-400 hover:text-white" onclick="switchScreen('screen-camera')">
+            ← Volver
+          </button>
+          <span class="text-sm font-bold text-white">Galería de Documento</span>
+          <div class="w-8"></div>
+        </div>
+        <div class="flex-1 overflow-y-auto pt-16 pb-24">
+          <!-- Carrusel Horizontal -->
+          <div id="gallery-cards-container" class="gallery-carousel bg-[#0c0f14]"></div>
+          
+          <!-- Casilla Principal y Sub-casillas Separadas -->
+          <div class="p-4 space-y-3">
+            <label class="touch-checkbox-label">
+              <input id="chk-main-hash" type="checkbox" class="touch-checkbox" onchange="onToggleMainHashCheckbox(this.checked)" />
+              <span>Generar constancia criptográfica y Hash (SHA-256)</span>
+            </label>
+
+            <div id="sub-checkboxes-container" class="pl-6 flex flex-col gap-2" style="display: none;">
+              <label class="touch-checkbox-label bg-emerald-950/20 border-emerald-500/30 text-emerald-200">
+                <input id="chk-include-photo" type="checkbox" class="touch-checkbox" onchange="onTogglePhotoCheckbox(this.checked)" />
+                <span class="flex-1">Incluir Fotografía Frontal del Otorgante</span>
+                <span id="label-selfie-status" class="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded-full font-black" style="display: none;"></span>
+              </label>
+
+              <label class="touch-checkbox-label bg-emerald-950/20 border-emerald-500/30 text-emerald-200">
+                <input id="chk-include-sig" type="checkbox" class="touch-checkbox" onchange="onToggleSignatureCheckbox(this.checked)" />
+                <span class="flex-1">Incluir Firma Electrónica Táctil</span>
+                <span id="label-signature-status" class="text-[10px] bg-emerald-500 text-slate-950 px-2 py-0.5 rounded-full font-black" style="display: none;"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Menú de Envío Multicanal -->
+        <div class="pb-safe px-safe py-3 bg-[#0a0f18] border-t border-white/10 flex flex-col gap-2 absolute bottom-0 inset-x-0 z-20">
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" class="btn-touch-action bg-[#128c7e] text-white" onclick="executeDocumentDispatch('whatsapp')">
+              📱 WhatsApp
+            </button>
+            <button type="button" class="btn-touch-action bg-slate-800 text-white" onclick="executeDocumentDispatch('email')">
+              ✉️ Correo
+            </button>
+          </div>
+          <button type="button" class="btn-touch-primary w-full" onclick="executeDocumentDispatch('download')">
+            💾 Descargar en este Teléfono
+          </button>
+        </div>
+      </div>
+
+      <!-- ESTADO 4: ÉXITO / CONFIRMACIÓN (#screen-success) -->
+      <div id="screen-success" class="screen-state screen-hidden" style="display: none !important;">
+        <div class="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-5 max-w-sm mx-auto">
+          <div class="w-20 h-20 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shadow-xl border border-emerald-500/40 text-4xl">
+            ✓
+          </div>
+          <div class="space-y-1">
+            <h2 class="text-2xl font-black text-white">¡Documento Enviado!</h2>
+            <p class="text-xs text-slate-300">Tu archivo ha sido generado y certificado con éxito.</p>
+          </div>
+          <!-- 3 BOTONES ERGONÓMICOS AMPLIOS -->
+          <div class="flex flex-col gap-3 w-full pt-2">
+            <button type="button" class="btn-touch-primary w-full" onclick="switchScreen('screen-camera')">
+              + Iniciar Nuevo Escaneo
+            </button>
+            <button type="button" class="btn-touch-action w-full" onclick="navigator.share ? navigator.share({ title: 'RHDocScan', url: window.location.href }) : alert('Enlace copiado')">
+              🔗 Compartir RHDocScan
+            </button>
+            <button type="button" class="btn-touch-action w-full" onclick="openFeedbackModal()">
+              💬 Comentarios y Sugerencias
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL DE CÁMARA FRONTAL / SELFIE (#modal-selfie) -->
+      <div id="modal-selfie" class="modal-backdrop" style="display: none;">
+        <div class="modal-content">
+          <div class="flex items-center justify-between pb-2 border-b border-white/10">
+            <h3 class="font-bold text-white text-sm">Fotografía Frontal del Otorgante</h3>
+            <button type="button" class="text-slate-400 text-xl font-bold" onclick="closeFrontCameraModal()">✕</button>
+          </div>
+          <div class="oval-face-guide">
+            <video id="video-selfie" class="w-full h-full object-cover transform -scale-x-100" playsinline muted autoplay></video>
+          </div>
+          <!-- BOTÓN SITUADO ABAJO, MIN 52px, VERDE ESMERALDA INTERACTIVO -->
+          <div class="pt-4 flex flex-col gap-2">
+            <button id="btn-capture-selfie" type="button" class="btn-touch-primary w-full" onclick="captureSelfiePhoto()">
+              📷 Tomar Foto Frontal
+            </button>
+            <button type="button" class="btn-touch-action w-full" onclick="closeFrontCameraModal()">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL DE FIRMA TÁCTIL (#modal-signature) -->
+      <div id="modal-signature" class="modal-backdrop" style="display: none;">
+        <div class="modal-content">
+          <div class="flex items-center justify-between pb-2 border-b border-white/10">
+            <h3 class="font-bold text-white text-sm">Firma Electrónica Táctil</h3>
+            <button type="button" class="text-slate-400 text-xl font-bold" onclick="closeSignatureModal()">✕</button>
+          </div>
+          <canvas id="canvas-signature" class="signature-canvas" width="400" height="220"></canvas>
+          <div class="grid grid-cols-2 gap-2 pt-2">
+            <button type="button" class="btn-touch-action" onclick="clearSignatureCanvas()">
+              Borrar
+            </button>
+            <button type="button" class="btn-touch-primary" onclick="saveSignature()">
+              Guardar Firma
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL DE OBSERVACIONES Y SUGERENCIAS (#modal-feedback) -->
+      <div id="modal-feedback" class="modal-backdrop" style="display: none;">
+        <div class="modal-content">
+          <div class="flex items-center justify-between pb-2 border-b border-white/10">
+            <h3 class="font-bold text-white text-sm">Comentarios y Sugerencias</h3>
+            <button type="button" class="text-slate-400 text-xl font-bold" onclick="closeFeedbackModal()">✕</button>
+          </div>
+          <form onsubmit="submitFeedback(event)" class="space-y-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Contacto (Opcional):</label>
+              <input id="feedback-contact" type="text" placeholder="Tu nombre, teléfono o correo" class="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Mensaje / Observación:</label>
+              <textarea id="feedback-message" required rows="4" placeholder="Escribe aquí tu observación..." class="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white resize-none"></textarea>
+            </div>
+            <button type="submit" class="btn-touch-primary w-full">
+              Enviar Sugerencia
+            </button>
+          </form>
+        </div>
+      </div>
     </div>
+
+    <!-- SCRIPTS DE ARRANQUE -->
     <script type="module" src="/app.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -169,9 +169,27 @@ export function calculateFolioQuad(
   return { screenQuad, sensorQuad };
 }
 
+export function sortQuadPoints(pts: Point[]): Quad {
+  // Ordenamiento geométrico canónico:
+  // Top-Left: suma mínima (x + y)
+  // Bottom-Right: suma máxima (x + y)
+  // Top-Right: diferencia mínima (y - x)
+  // Bottom-Left: diferencia máxima (y - x)
+  const sortedBySum = [...pts].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+  const tl = sortedBySum[0];
+  const br = sortedBySum[3];
+
+  const remaining = [sortedBySum[1], sortedBySum[2]];
+  remaining.sort((a, b) => (a.y - a.x) - (b.y - b.x));
+  const tr = remaining[0];
+  const bl = remaining[1];
+
+  return [tl, tr, br, bl];
+}
+
 /**
  * Encuentra de forma exacta el cuadrilátero dominante de la hoja de papel sobre el fotograma capturado
- * usando análisis de gradientes Canny/Sobel e interpolación de polígonos convexos (aproxPolyDP client-side).
+ * usando OpenCV.js (cv.Canny + cv.findContours + cv.approxPolyDP con área > 20%) o análisis de gradientes.
  * Si no detecta contraste suficiente, aplica como fallback el marco Folio/Oficio centrado.
  */
 export function findDominantDocumentQuad(
@@ -195,8 +213,8 @@ export function findDominantDocumentQuad(
       ];
     }
 
-    // Canvas de análisis de alta fidelidad pero eficiente (480px de ancho)
-    const procW = 480;
+    // 1. Downscale temporal a 400px de ancho para análisis rápido a 60 FPS
+    const procW = 400;
     const procH = Math.round(procW * (imgH / imgW));
     const canvas = document.createElement('canvas');
     canvas.width = procW;
@@ -210,10 +228,69 @@ export function findDominantDocumentQuad(
     ];
 
     ctx.drawImage(imageSource, 0, 0, procW, procH);
+
+    // 2. Ejecución con OpenCV.js si está cargado en el navegador
+    const cv = (window as unknown as { cv?: any }).cv;
+    if (cv && cv.Mat && cv.imread) {
+      try {
+        const src = cv.imread(canvas);
+        const gray = new cv.Mat();
+        const blur = new cv.Mat();
+        const edges = new cv.Mat();
+        const contours = new cv.MatVector();
+        const hierarchy = new cv.Mat();
+
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+        cv.Canny(blur, edges, 50, 150);
+        cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+        let maxArea = procW * procH * 0.20; // Requisito: área > 20% de la pantalla
+        let bestQuad: Point[] | null = null;
+
+        for (let i = 0; i < contours.size(); ++i) {
+          const contour = contours.get(i);
+          const peri = cv.arcLength(contour, true);
+          const approx = new cv.Mat();
+          cv.approxPolyDP(contour, approx, 0.02 * peri, true);
+
+          if (approx.rows === 4 && cv.isContourConvex(approx)) {
+            const area = cv.contourArea(approx);
+            if (area > maxArea) {
+              maxArea = area;
+              const pts: Point[] = [];
+              for (let j = 0; j < 4; j++) {
+                pts.push({
+                  x: Math.max(0, Math.min(1, approx.data32S[j * 2] / procW)),
+                  y: Math.max(0, Math.min(1, approx.data32S[j * 2 + 1] / procH)),
+                });
+              }
+              bestQuad = pts;
+            }
+          }
+          approx.delete();
+          contour.delete();
+        }
+
+        src.delete();
+        gray.delete();
+        blur.delete();
+        edges.delete();
+        contours.delete();
+        hierarchy.delete();
+
+        if (bestQuad && bestQuad.length === 4) {
+          return sortQuadPoints(bestQuad);
+        }
+      } catch (cvErr) {
+        console.warn('OpenCV.js contour error, fallback a gradientes:', cvErr);
+      }
+    }
+
     const imgData = ctx.getImageData(0, 0, procW, procH);
     const data = imgData.data;
 
-    // 1. Escala de grises con suavizado gaussiano 3x3 ligero
+    // 3. Fallback rápido nativo (Sobel / Canny + Rayos en JavaScript puro)
     const gray = new Float32Array(procW * procH);
     for (let i = 0, p = 0; i < data.length; i += 4, p++) {
       gray[p] = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];

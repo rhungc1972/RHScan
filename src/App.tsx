@@ -78,6 +78,15 @@ export default function App() {
 
   // Función de enrutamiento y cambio de pantalla
   const switchScreen = useCallback((screenId: AppScreenState) => {
+    // Si salimos de la cámara, liberar el hardware de video para evitar colisiones y pantallas negras
+    if (screenId !== 'screen-camera') {
+      const win = window as unknown as { activeStream?: MediaStream | null };
+      if (win.activeStream) {
+        win.activeStream.getTracks().forEach((track) => track.stop());
+        win.activeStream = null;
+      }
+    }
+
     setCurrentScreen(screenId);
     if (typeof document !== 'undefined') {
       document.body.setAttribute('data-screen', screenId);

@@ -20,7 +20,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Quad, Point, ScanFilter, ScannedPage } from '../types';
-import { warpPerspective, applyImageFilter } from '../utils/cvEngine';
+import { warpPerspective, applyImageFilter, findDominantDocumentQuad } from '../utils/cvEngine';
 import { triggerHaptic } from '../utils/audioFeedback';
 
 interface PerspectiveEditorProps {
@@ -103,6 +103,16 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
     window.addEventListener('resize', updateImageBounds);
     return () => window.removeEventListener('resize', updateImageBounds);
   }, [updateImageBounds]);
+
+  const handleImageLoaded = useCallback(() => {
+    updateImageBounds();
+    if (imageRef.current) {
+      const detected = findDominantDocumentQuad(imageRef.current, capturedImage.initialQuad);
+      if (detected) {
+        setCorners(detected);
+      }
+    }
+  }, [updateImageBounds, capturedImage.initialQuad]);
 
   // Manejo de arrastre de vértices (Touch & Mouse)
   const handlePointerDown = (index: number, e: React.PointerEvent) => {
@@ -350,7 +360,7 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
           ref={imageRef}
           src={capturedImage.dataUrl}
           alt="Captura"
-          onLoad={updateImageBounds}
+          onLoad={handleImageLoaded}
           className={`max-w-full max-h-full object-contain pointer-events-none transition-opacity duration-200 ${
             showPreviewMode ? 'opacity-0' : 'opacity-100'
           }`}

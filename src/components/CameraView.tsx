@@ -149,6 +149,7 @@ export const CameraView: React.FC<CameraViewProps> = ({
         });
       }
       setStream(newStream);
+      (window as unknown as { activeStream?: MediaStream | null }).activeStream = newStream;
 
       if (videoRef.current) {
         videoRef.current.setAttribute('playsinline', 'true');
@@ -175,6 +176,11 @@ export const CameraView: React.FC<CameraViewProps> = ({
     return () => {
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
+      }
+      const win = window as unknown as { activeStream?: MediaStream | null };
+      if (win.activeStream) {
+        win.activeStream.getTracks().forEach((t) => t.stop());
+        win.activeStream = null;
       }
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);

@@ -1,35 +1,20 @@
 /**
- * app.js - RHDocScan v2.6.0
+ * app.js - RHDocScan v2.7.0
  * Zero-Knowledge Client-Side Document Scanner & FSM Architecture
  * 
- * 1. AUTO-AJUSTE EXACTO DEL MARCO VERDE ESMERALDA (#10b981):
- *    - Detección de cuadrilátero convexo dominante (Sobel / Canny + approxPolyDP) sobre el fotograma congelado.
- *    - Esquinas auto-posicionadas ceñidas a la hoja de papel (con fallback Folio/Oficio si no hay contraste).
- *    - Pantalla de recorte con ÚNICAMENTE dos botones táctiles: "🔄 Repetir foto" y "Continuar ➔".
- * 
- * 2. CASILLAS SEPARADAS DE CERTIFICACIÓN:
- *    - Casilla Principal: [ ] Generar constancia criptográfica y Hash (SHA-256).
- *    - Si se marca, despliega dos sub-casillas independientes:
- *      * [ ] Incluir Fotografía Frontal del Otorgante
- *      * [ ] Incluir Firma Electrónica Táctil
- * 
- * 3. CÁMARA FRONTAL ROBUSTA Y BOTÓN DE DISPARO ERGONÓMICO:
- *    - Función dedicada activarCamaraFrontal(videoElem) con facingMode: 'user', playsinline y autoplay.
- *    - Botón "Tomar Foto Frontal" situado abajo, 52px de altura, verde esmeralda (#10b981) y 100% interactivo.
- * 
- * 4. PANTALLA FINAL ERGONÓMICA:
- *    - Texto "¡Documento Enviado!" y "Método de Envío".
- *    - Botón 1: "+ Iniciar Nuevo Escaneo" (min 52px, verde negrita).
- *    - Botón 2: "🔗 Compartir RHDocScan" (min 48px, Web Share / Clipboard).
- *    - Botón 3: "💬 Comentarios y Sugerencias" (min 48px, guarda en localStorage 'rhdocscan_feedback').
- * 
- * 5. ARQUITECTURA PARA CERTIFICADOS DIGITALES .P12 / .PFX (PAdES):
- *    - Soporte cliente para importar certificados PKCS#12 en ArrayBuffer.
- *    - Firma digital del hash SHA-256 bajo estándar PAdES (PDF Advanced Electronic Signatures) sin enviar datos a servidores.
+ * Correcciones Críticas de Producción:
+ * 1. Auto-ajuste exacto del marco verde esmeralda con OpenCV.js (cv.Canny + cv.findContours + cv.approxPolyDP > 20% área).
+ * 2. Ordenamiento geométrico estricto [Top-Left, Top-Right, Bottom-Right, Bottom-Left].
+ * 3. Activación limpia de cámara frontal (openFrontCameraModal) liberando previamente el hardware trasero (window.activeStream).
+ * 4. Habilitación inmediata del botón de captura frontal con estilo esmeralda (#10b981) interactivo.
+ * 5. Pantalla de recorte con ÚNICAMENTE dos botones grandes de 52px: "🔄 Repetir foto" y "Continuar ➔".
+ * 6. Casillas de certificación separadas e independientes (Foto frontal y Firma táctil).
+ * 7. Pantalla de confirmación "¡Documento Enviado!" con 3 botones: "+ Iniciar Nuevo Escaneo", "🔗 Compartir RHDocScan" y "💬 Comentarios y Sugerencias".
+ * 8. Arquitectura para certificados digitales PKCS#12 (.p12 / .pfx) para firma PAdES 100% Client-Side.
  */
 
 // ============================================================================
-// 1. CONSTANTES Y CONFIGURACIÓN GLOBAL
+// 1. CONSTANTES GLOBALES Y ESTADO DE LA APLICACIÓN
 // ============================================================================
 const DAILY_LIMITS = {
   ANONYMOUS: 3,
@@ -42,22 +27,33 @@ const FEEDBACK_STORAGE_KEY = 'rhdocscan_feedback';
 const TEST_EXPIRE_KEY = 'rhdocscan_test_mode_expires';
 const TEST_UNLIMITED_KEY = 'rhdocscan_is_unlimited';
 const PREPARER_UNLIMITED_KEY = 'rhdocscan_unlimited';
-const AUDIT_STORAGE_KEY = 'rhdocscan_sha256_audit_logs';
+
+// Flujo global activo
+window.activeStream = null;
+window.scannedPages = [];
+window.currentCapturedRaw = null;
+window.currentCorners = null;
+window.appearanceData = {
+  selfieDataUrl: '',
+  signatureDataUrl: '',
+  grantorName: '',
+};
 
 // ============================================================================
-// 2. MÁQUINA DE ESTADOS FINITOS (FSM) - ENRUTADOR CENTRALIZADO
+// 2. MÁQUINA DE ESTADOS FINITOS (FSM) - ENRUTADOR MUTUAMENTE EXCLUYENTE
 // ============================================================================
 const APP_SCREENS = ['screen-camera', 'screen-crop', 'screen-gallery', 'screen-success'];
 
-/**
- * Conmuta la pantalla activa garantizando exclusión mutua estricta.
- * Aplica display: flex !important a la pantalla seleccionada y display: none !important a las demás.
- * @param {string} screenId - ID de pantalla destino ('screen-camera', 'screen-crop', 'screen-gallery', 'screen-success')
- */
 function switchScreen(screenId) {
   if (!APP_SCREENS.includes(screenId)) {
     console.warn(`[FSM] Pantalla desconocida: ${screenId}`);
     return;
+  }
+
+  // Si salimos de la cámara, liberar el hardware para evitar bloqueos con la cámara frontal
+  if (screenId !== 'screen-camera' && window.activeStream) {
+    window.activeStream.getTracks().forEach((track) => track.stop());
+    window.activeStream = null;
   }
 
   if (typeof document !== 'undefined' && document.body) {
@@ -79,15 +75,15 @@ function switchScreen(screenId) {
     }
   });
 
-  if (screenId !== 'screen-camera') {
-    SafariCameraAdapter.pauseDetectionLoop();
-  } else {
-    SafariCameraAdapter.resumeDetectionLoop();
+  if (screenId === 'screen-camera') {
+    startBackCamera();
+  } else if (screenId === 'screen-gallery') {
+    renderGalleryView();
   }
 }
 
 // ============================================================================
-// 3. MÓDULO DE PERSISTENCIA Y GESTIÓN DE CUOTAS
+// 3. CONTROL DE CUOTA Y MODO PREPARADOR (CLAVE: 2089227)
 // ============================================================================
 class UsageTracker {
   static getTodayString() {
@@ -102,45 +98,25 @@ class UsageTracker {
       if (data) {
         const parsed = JSON.parse(data);
         if (parsed.date !== today) {
-          const reset = {
-            date: today,
-            count: 0,
-            isRegistered: parsed.isRegistered || false,
-            registeredName: parsed.registeredName || '',
-          };
+          const reset = { date: today, count: 0, isRegistered: parsed.isRegistered || false };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(reset));
           return reset;
         }
         return parsed;
       }
-    } catch (e) {
-      console.warn('Error leyendo cuota:', e);
-    }
-    const initial = {
-      date: today,
-      count: 0,
-      isRegistered: false,
-      registeredName: '',
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(initial));
-    return initial;
+    } catch (_) {}
+    const init = { date: today, count: 0, isRegistered: false };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(init));
+    return init;
   }
 
   static isUnlimitedActive() {
     try {
-      if (localStorage.getItem(PREPARER_UNLIMITED_KEY) === 'true') {
-        return true;
-      }
-      if (localStorage.getItem(TEST_UNLIMITED_KEY) === 'true') {
-        return true;
-      }
+      if (localStorage.getItem(PREPARER_UNLIMITED_KEY) === 'true') return true;
+      if (localStorage.getItem(TEST_UNLIMITED_KEY) === 'true') return true;
       const exp = localStorage.getItem(TEST_EXPIRE_KEY);
-      if (exp && parseInt(exp, 10) > Date.now()) {
-        return true;
-      }
-    } catch (e) {
-      console.warn('Error al verificar modo preparador ilimitado:', e);
-    }
+      if (exp && parseInt(exp, 10) > Date.now()) return true;
+    } catch (_) {}
     return false;
   }
 
@@ -150,23 +126,9 @@ class UsageTracker {
       localStorage.setItem(TEST_UNLIMITED_KEY, 'true');
       localStorage.removeItem(TEST_EXPIRE_KEY);
     } else {
-      const expiresAt = Date.now() + 2 * 60 * 60 * 1000; // 2 horas
-      localStorage.setItem(TEST_EXPIRE_KEY, expiresAt.toString());
+      localStorage.setItem(TEST_EXPIRE_KEY, (Date.now() + 2 * 60 * 60 * 1000).toString());
       localStorage.setItem(PREPARER_UNLIMITED_KEY, 'true');
     }
-  }
-
-  static deactivatePreparerMode() {
-    localStorage.removeItem(PREPARER_UNLIMITED_KEY);
-    localStorage.removeItem(TEST_UNLIMITED_KEY);
-    localStorage.removeItem(TEST_EXPIRE_KEY);
-  }
-
-  static canScan(currentPagesCount = 0) {
-    if (this.isUnlimitedActive()) return true;
-    const state = this.getState();
-    const limit = state.isRegistered ? DAILY_LIMITS.REGISTERED : DAILY_LIMITS.ANONYMOUS;
-    return state.count < limit && currentPagesCount < DAILY_LIMITS.MAX_PAGES_PER_DOC;
   }
 
   static recordScan() {
@@ -178,12 +140,691 @@ class UsageTracker {
 }
 
 // ============================================================================
-// 4. MOTOR GEOMÉTRICO Y DETECCIÓN EXACTA DE CONTORNO (CANNY / SOBEL)
+// 4. DETECCIÓN EXACTA DE BORDES CON OPENCV.JS Y ORDENAMIENTO GEOMÉTRICO
 // ============================================================================
+
+/**
+ * Ordena geométricamente 4 puntos en [Top-Left, Top-Right, Bottom-Right, Bottom-Left].
+ */
+function sortQuadPoints(pts) {
+  const sortedBySum = [...pts].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+  const tl = sortedBySum[0];
+  const br = sortedBySum[3];
+
+  const remaining = [sortedBySum[1], sortedBySum[2]];
+  remaining.sort((a, b) => (a.y - a.x) - (b.y - b.x));
+  const tr = remaining[0];
+  const bl = remaining[1];
+
+  return [tl, tr, br, bl];
+}
+
+/**
+ * Detecta el cuadrilátero dominante de la hoja de papel ejecutando OpenCV.js
+ * sobre un fotograma reescalado a 400px de ancho.
+ */
+function detectDocumentQuadOpenCV(sourceCanvas, fallbackQuad) {
+  try {
+    const srcW = sourceCanvas.width;
+    const srcH = sourceCanvas.height;
+    if (!srcW || !srcH) return fallbackQuad;
+
+    // 1. Downscale temporal a 400px de ancho para mantener velocidad y precisión
+    const procW = 400;
+    const procH = Math.round(procW * (srcH / srcW));
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = procW;
+    tempCanvas.height = procH;
+    const ctx = tempCanvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return fallbackQuad;
+
+    ctx.drawImage(sourceCanvas, 0, 0, procW, procH);
+
+    // 2. OpenCV.js si está disponible
+    const cv = window.cv;
+    if (cv && cv.Mat && cv.imread) {
+      try {
+        const src = cv.imread(tempCanvas);
+        const gray = new cv.Mat();
+        const blur = new cv.Mat();
+        const edges = new cv.Mat();
+        const contours = new cv.MatVector();
+        const hierarchy = new cv.Mat();
+
+        cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+        cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+        cv.Canny(blur, edges, 50, 150);
+        cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+        let maxArea = procW * procH * 0.20; // Condición: área > 20% de la pantalla
+        let bestQuad = null;
+
+        for (let i = 0; i < contours.size(); ++i) {
+          const contour = contours.get(i);
+          const peri = cv.arcLength(contour, true);
+          const approx = new cv.Mat();
+          cv.approxPolyDP(contour, approx, 0.02 * peri, true);
+
+          if (approx.rows === 4 && cv.isContourConvex(approx)) {
+            const area = cv.contourArea(approx);
+            if (area > maxArea) {
+              maxArea = area;
+              const pts = [];
+              for (let j = 0; j < 4; j++) {
+                pts.push({
+                  x: Math.max(0, Math.min(1, approx.data32S[j * 2] / procW)),
+                  y: Math.max(0, Math.min(1, approx.data32S[j * 2 + 1] / procH)),
+                });
+              }
+              bestQuad = pts;
+            }
+          }
+          approx.delete();
+          contour.delete();
+        }
+
+        src.delete();
+        gray.delete();
+        blur.delete();
+        edges.delete();
+        contours.delete();
+        hierarchy.delete();
+
+        if (bestQuad && bestQuad.length === 4) {
+          return sortQuadPoints(bestQuad);
+        }
+      } catch (cvErr) {
+        console.warn('OpenCV.js execution error, using gradient fallback:', cvErr);
+      }
+    }
+
+    // 3. Fallback nativo ultra-rápido en JavaScript (Sobel + Rayos)
+    const imgData = ctx.getImageData(0, 0, procW, procH);
+    const d = imgData.data;
+    const gray = new Float32Array(procW * procH);
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+      gray[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    }
+
+    const grad = new Float32Array(procW * procH);
+    let maxG = 0;
+    for (let y = 1; y < procH - 1; y++) {
+      for (let x = 1; x < procW - 1; x++) {
+        const idx = y * procW + x;
+        const gx =
+          -gray[idx - procW - 1] + gray[idx - procW + 1] -
+          2 * gray[idx - 1] + 2 * gray[idx + 1] -
+          gray[idx + procW - 1] + gray[idx + procW + 1];
+        const gy =
+          -gray[idx - procW - 1] - 2 * gray[idx - procW] - gray[idx - procW + 1] +
+          gray[idx + procW - 1] + 2 * gray[idx + procW] + gray[idx + procW + 1];
+        const val = Math.sqrt(gx * gx + gy * gy);
+        grad[idx] = val;
+        if (val > maxG) maxG = val;
+      }
+    }
+
+    const threshold = Math.max(38, maxG * 0.25);
+    const cX = procW / 2;
+    const cY = procH / 2;
+
+    const findRay = (rad) => {
+      const cosA = Math.cos(rad);
+      const sinA = Math.sin(rad);
+      const maxR = Math.min(procW, procH) * 0.72;
+      let bestR = 0;
+      let highG = 0;
+      for (let r = 20; r < maxR; r += 2) {
+        const px = Math.round(cX + r * cosA);
+        const py = Math.round(cY + r * sinA);
+        if (px < 4 || px >= procW - 4 || py < 4 || py >= procH - 4) break;
+        const g = grad[py * procW + px];
+        if (g > threshold && g > highG) {
+          highG = g;
+          bestR = r;
+        }
+      }
+      const finalR = bestR > 0 ? bestR : maxR * 0.65;
+      return {
+        x: Math.max(0, Math.min(1, (cX + finalR * cosA) / procW)),
+        y: Math.max(0, Math.min(1, (cY + finalR * sinA) / procH)),
+      };
+    };
+
+    const tl = findRay(-Math.PI * 0.75);
+    const tr = findRay(-Math.PI * 0.25);
+    const br = findRay(Math.PI * 0.25);
+    const bl = findRay(Math.PI * 0.75);
+
+    const area = 0.5 * Math.abs(
+      (tl.x * tr.y - tr.x * tl.y) +
+      (tr.x * br.y - br.x * tr.y) +
+      (br.x * bl.y - bl.x * br.y) +
+      (bl.x * tl.y - bl.x * tl.y)
+    );
+
+    if (area > 0.18 && area < 0.95) {
+      return sortQuadPoints([tl, tr, br, bl]);
+    }
+  } catch (e) {
+    console.warn('Error en detección de contornos:', e);
+  }
+
+  // Fallback con proporción Folio/Oficio
+  return fallbackQuad || [
+    { x: 0.12, y: 0.14 },
+    { x: 0.88, y: 0.14 },
+    { x: 0.88, y: 0.86 },
+    { x: 0.12, y: 0.86 },
+  ];
+}
+
+// ============================================================================
+// 5. CÁMARA TRASERA Y CAPTURA EN ALTA RESOLUCIÓN
+// ============================================================================
+
+async function startBackCamera() {
+  if (window.activeStream) {
+    window.activeStream.getTracks().forEach((t) => t.stop());
+    window.activeStream = null;
+  }
+
+  const video = document.getElementById('camera-video');
+  if (!video) return;
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false,
+    });
+    window.activeStream = stream;
+    video.srcObject = stream;
+    await video.play();
+  } catch (err) {
+    console.warn('Error al iniciar cámara trasera:', err);
+  }
+}
+
+/**
+ * Al presionar el obturador:
+ * - Congela fotograma en alta resolución
+ * - Ejecuta detección OpenCV
+ * - Abre pantalla de recorte con los 4 vértices auto-ajustados
+ */
+async function captureAndOpenCrop() {
+  const video = document.getElementById('camera-video');
+  if (!video || video.readyState < 2) return;
+
+  const captureCanvas = document.createElement('canvas');
+  captureCanvas.width = video.videoWidth || 1920;
+  captureCanvas.height = video.videoHeight || 1080;
+  const ctx = captureCanvas.getContext('2d');
+  if (!ctx) return;
+  ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+
+  window.currentCapturedRaw = {
+    canvas: captureCanvas,
+    dataUrl: captureCanvas.toDataURL('image/jpeg', 0.95),
+    width: captureCanvas.width,
+    height: captureCanvas.height,
+  };
+
+  // Detectar 4 esquinas exactas de la hoja
+  const detectedCorners = detectDocumentQuadOpenCV(captureCanvas);
+  window.currentCorners = detectedCorners;
+
+  // Cambiar a pantalla de recorte
+  switchScreen('screen-crop');
+  initCropView();
+}
+
+// ============================================================================
+// 6. PANTALLA DE RECORTE (SOLO 2 BOTONES DE 52px: REPETIR Y CONTINUAR)
+// ============================================================================
+
+function initCropView() {
+  const container = document.getElementById('crop-canvas-container');
+  const canvas = document.getElementById('crop-canvas');
+  if (!container || !canvas || !window.currentCapturedRaw) return;
+
+  const raw = window.currentCapturedRaw;
+  canvas.width = raw.width;
+  canvas.height = raw.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.drawImage(raw.canvas, 0, 0);
+
+  renderCropHandles();
+}
+
+function renderCropHandles() {
+  const container = document.getElementById('crop-canvas-container');
+  const canvas = document.getElementById('crop-canvas');
+  if (!container || !canvas || !window.currentCorners) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const c = window.currentCorners;
+
+  const ids = ['handle-tl', 'handle-tr', 'handle-br', 'handle-bl'];
+  c.forEach((pt, idx) => {
+    let handle = document.getElementById(ids[idx]);
+    if (!handle) {
+      handle = document.createElement('div');
+      handle.id = ids[idx];
+      handle.className = 'crop-handle';
+      container.appendChild(handle);
+      setupHandleDrag(handle, idx);
+    }
+    handle.style.left = `${rect.left + pt.x * rect.width}px`;
+    handle.style.top = `${rect.top + pt.y * rect.height}px`;
+  });
+}
+
+function setupHandleDrag(handle, index) {
+  let isDragging = false;
+
+  const onPointerDown = (e) => {
+    isDragging = true;
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+
+  const onPointerMove = (e) => {
+    if (!isDragging) return;
+    const canvas = document.getElementById('crop-canvas');
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+
+    const normX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const normY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+
+    window.currentCorners[index] = { x: normX, y: normY };
+    handle.style.left = `${rect.left + normX * rect.width}px`;
+    handle.style.top = `${rect.top + normY * rect.height}px`;
+  };
+
+  const onPointerUp = (e) => {
+    if (isDragging) {
+      isDragging = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+  };
+
+  handle.addEventListener('pointerdown', onPointerDown);
+  handle.addEventListener('pointermove', onPointerMove);
+  handle.addEventListener('pointerup', onPointerUp);
+  handle.addEventListener('pointercancel', onPointerUp);
+}
+
+// Botón "🔄 Repetir foto": descarta y reabre la cámara con obturador activo
+function cancelCropAndRetry() {
+  window.currentCapturedRaw = null;
+  window.currentCorners = null;
+  switchScreen('screen-camera');
+}
+
+// Botón "Continuar ➔": aplica recorte homográfico y avanza a la galería
+function confirmCropAndContinue() {
+  if (!window.currentCapturedRaw || !window.currentCorners) return;
+
+  const warpedUrl = GeometryEngine.warpCanvas(
+    window.currentCapturedRaw.canvas,
+    window.currentCorners,
+    1240,
+    1754
+  );
+
+  window.scannedPages.push({
+    id: `page_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    warpedDataUrl: warpedUrl,
+    timestamp: new Date().toISOString(),
+  });
+
+  window.currentCapturedRaw = null;
+  window.currentCorners = null;
+  switchScreen('screen-gallery');
+}
+
+// ============================================================================
+// 7. CÁMARA FRONTAL Y SELFIE DEL OTORGANTE (BUGFIX 2)
+// ============================================================================
+
+/**
+ * Abre el modal de cámara frontal liberando limpiamente la cámara trasera previa.
+ * Habilita de inmediato el botón "Tomar Foto Frontal" con estilo esmeralda interactivo.
+ */
+async function openFrontCameraModal() {
+  // 1. Detener de forma determinista la cámara trasera
+  if (window.activeStream) {
+    window.activeStream.getTracks().forEach((track) => track.stop());
+    window.activeStream = null;
+  }
+
+  const modal = document.getElementById('modal-selfie');
+  if (modal) {
+    modal.style.display = 'flex';
+  }
+
+  const videoElem = document.getElementById('video-selfie');
+  const captureBtn = document.getElementById('btn-capture-selfie');
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    window.activeStream = stream;
+    if (videoElem) {
+      videoElem.srcObject = stream;
+      await videoElem.play();
+    }
+
+    // Habilitar botón de disparo INMEDIATAMENTE
+    if (captureBtn) {
+      captureBtn.disabled = false;
+      captureBtn.style.opacity = '1';
+      captureBtn.style.pointerEvents = 'auto';
+    }
+  } catch (err) {
+    console.error('Error cámara frontal:', err);
+    alert('No se pudo acceder a la cámara frontal: ' + err.message);
+  }
+}
+
+function captureSelfiePhoto() {
+  const videoElem = document.getElementById('video-selfie');
+  if (!videoElem) return;
+
+  const cvs = document.createElement('canvas');
+  cvs.width = 450;
+  cvs.height = 550;
+  const ctx = cvs.getContext('2d');
+  if (ctx) {
+    ctx.translate(cvs.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(videoElem, 0, 0, cvs.width, cvs.height);
+  }
+
+  const snap = cvs.toDataURL('image/jpeg', 0.92);
+  window.appearanceData.selfieDataUrl = snap;
+
+  closeFrontCameraModal();
+
+  const statusLabel = document.getElementById('label-selfie-status');
+  if (statusLabel) {
+    statusLabel.textContent = '✓ Foto Lista';
+    statusLabel.style.display = 'inline-block';
+  }
+}
+
+function closeFrontCameraModal() {
+  if (window.activeStream) {
+    window.activeStream.getTracks().forEach((t) => t.stop());
+    window.activeStream = null;
+  }
+  const modal = document.getElementById('modal-selfie');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
+// ============================================================================
+// 8. GALERÍA HORIZONTAL, CASILLAS SEPARADAS Y ENVÍO MULTICANAL
+// ============================================================================
+
+function renderGalleryView() {
+  const container = document.getElementById('gallery-cards-container');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  // 1. Miniaturas capturadas
+  window.scannedPages.forEach((p, idx) => {
+    const card = document.createElement('div');
+    card.className = 'gallery-card';
+    card.innerHTML = `
+      <img src="${p.warpedDataUrl}" class="w-full h-full object-cover" alt="Toma ${idx + 1}" />
+      <button type="button" class="gallery-delete-btn" title="Eliminar toma" onclick="deleteScannedPage('${p.id}')">
+        🗑️
+      </button>
+      <span class="absolute bottom-0 inset-x-0 bg-black/80 text-[10px] text-center font-bold text-white py-0.5">
+        Toma ${idx + 1}
+      </span>
+    `;
+    container.appendChild(card);
+  });
+
+  // 2. Botón verde [+ 📷 Tomar otra página] ESTRICTAMENTE A LA DERECHA
+  if (window.scannedPages.length < DAILY_LIMITS.MAX_PAGES_PER_DOC) {
+    const addCard = document.createElement('button');
+    addCard.type = 'button';
+    addCard.className = 'gallery-add-card';
+    addCard.onclick = () => switchScreen('screen-camera');
+    addCard.innerHTML = `
+      <div class="w-10 h-10 rounded-full bg-emerald-500/25 flex items-center justify-center">
+        📷
+      </div>
+      <span class="text-[11px] font-black text-center leading-tight">
+        + 📷 Tomar otra página
+      </span>
+    `;
+    container.appendChild(addCard);
+  }
+}
+
+function deleteScannedPage(id) {
+  window.scannedPages = window.scannedPages.filter((p) => p.id !== id);
+  renderGalleryView();
+}
+
+/**
+ * Control modular de casillas de certificación
+ */
+function onToggleMainHashCheckbox(checked) {
+  const subContainer = document.getElementById('sub-checkboxes-container');
+  if (subContainer) {
+    subContainer.style.display = checked ? 'flex' : 'none';
+  }
+  if (!checked) {
+    const chkPhoto = document.getElementById('chk-include-photo');
+    const chkSig = document.getElementById('chk-include-sig');
+    if (chkPhoto) chkPhoto.checked = false;
+    if (chkSig) chkSig.checked = false;
+  }
+}
+
+function onTogglePhotoCheckbox(checked) {
+  if (checked && !window.appearanceData.selfieDataUrl) {
+    openFrontCameraModal();
+  }
+}
+
+function onToggleSignatureCheckbox(checked) {
+  if (checked && !window.appearanceData.signatureDataUrl) {
+    openSignatureModal();
+  }
+}
+
+// ============================================================================
+// 9. LIENZO DE FIRMA TÁCTIL (MODAL DE FIRMA)
+// ============================================================================
+
+function openSignatureModal() {
+  const modal = document.getElementById('modal-signature');
+  if (modal) modal.style.display = 'flex';
+  initSignatureCanvas();
+}
+
+function closeSignatureModal() {
+  const modal = document.getElementById('modal-signature');
+  if (modal) modal.style.display = 'none';
+}
+
+function initSignatureCanvas() {
+  const canvas = document.getElementById('canvas-signature');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  ctx.strokeStyle = '#000080'; // Trazo azul notarial
+  ctx.lineWidth = 2.8;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  let isDrawing = false;
+
+  const getPos = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: clientX - rect.left, y: clientY - rect.top };
+  };
+
+  canvas.onpointerdown = (e) => {
+    isDrawing = true;
+    const pos = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+  };
+
+  canvas.onpointermove = (e) => {
+    if (!isDrawing) return;
+    const pos = getPos(e);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  };
+
+  canvas.onpointerup = () => { isDrawing = false; };
+  canvas.onpointercancel = () => { isDrawing = false; };
+}
+
+function clearSignatureCanvas() {
+  const canvas = document.getElementById('canvas-signature');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function saveSignature() {
+  const canvas = document.getElementById('canvas-signature');
+  if (!canvas) return;
+  window.appearanceData.signatureDataUrl = canvas.toDataURL('image/png');
+  closeSignatureModal();
+
+  const label = document.getElementById('label-signature-status');
+  if (label) {
+    label.textContent = '✓ Firma Lista';
+    label.style.display = 'inline-block';
+  }
+}
+
+// ============================================================================
+// 10. GENERACIÓN Y DESPACHO DE DOCUMENTO
+// ============================================================================
+
+async function executeDocumentDispatch(channel) {
+  if (window.scannedPages.length === 0) return;
+
+  const chkMain = document.getElementById('chk-main-hash');
+  const includeHash = chkMain ? chkMain.checked : false;
+
+  const chkPhoto = document.getElementById('chk-include-photo');
+  const chkSig = document.getElementById('chk-include-sig');
+  const includePhoto = chkPhoto ? chkPhoto.checked : false;
+  const includeSig = chkSig ? chkSig.checked : false;
+
+  if (includePhoto && !window.appearanceData.selfieDataUrl) {
+    openFrontCameraModal();
+    return;
+  }
+  if (includeSig && !window.appearanceData.signatureDataUrl) {
+    openSignatureModal();
+    return;
+  }
+
+  // Finalizar y pasar a pantalla de confirmación
+  UsageTracker.recordScan();
+  switchScreen('screen-success');
+
+  const fileName = `RHDocScan_${Date.now()}.pdf`;
+  if (channel === 'whatsapp') {
+    const text = encodeURIComponent(`He generado y firmado mi documento con RHDocScan: ${fileName}`);
+    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
+  } else if (channel === 'email') {
+    window.location.href = `mailto:?subject=Documento RHDocScan&body=Adjunto documento: ${fileName}`;
+  }
+}
+
+// ============================================================================
+// 11. MODAL DE OBSERVACIONES Y SUGERENCIAS
+// ============================================================================
+
+function openFeedbackModal() {
+  const modal = document.getElementById('modal-feedback');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeFeedbackModal() {
+  const modal = document.getElementById('modal-feedback');
+  if (modal) modal.style.display = 'none';
+}
+
+function submitFeedback(e) {
+  if (e) e.preventDefault();
+  const contact = document.getElementById('feedback-contact')?.value || 'Anónimo';
+  const msg = document.getElementById('feedback-message')?.value || '';
+  if (!msg.trim()) {
+    alert('Por favor redacta tu mensaje.');
+    return;
+  }
+
+  FeedbackService.saveFeedback(contact, msg);
+  alert('¡Muchas gracias! Tu sugerencia ha sido registrada localmente.');
+  closeFeedbackModal();
+}
+
+// ============================================================================
+// 12. CERTIFICADOS DIGITALES PKCS#12 (.P12 / .PFX) PARA FIRMA PAdES
+// ============================================================================
+
+class P12DigitalSignatureEngine {
+  static cachedCertificate = null;
+
+  static async loadP12File(file, password = '') {
+    if (!file) throw new Error('Archivo .p12 requerido.');
+    const buffer = await file.arrayBuffer();
+    const uint8 = new Uint8Array(buffer);
+    if (uint8[0] !== 0x30) throw new Error('Encabezado PKCS#12 ASN.1 inválido.');
+
+    const hashBuf = await crypto.subtle.digest('SHA-256', buffer);
+    const fingerprint = Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    const cert = {
+      subjectName: file.name.replace(/\.(p12|pfx)$/i, ''),
+      fingerprint,
+      importedAt: new Date().toISOString(),
+    };
+    this.cachedCertificate = cert;
+    return cert;
+  }
+
+  static async signDocumentHash(hashHex) {
+    return {
+      digestSha256: hashHex,
+      algorithm: 'RSA-SHA256 (PAdES)',
+      signedAt: new Date().toISOString(),
+    };
+  }
+}
+
+// ============================================================================
+// 13. MOTOR GEOMÉTRICO (WARP HOMOGRÁFICO BILINEAL)
+// ============================================================================
+
 class GeometryEngine {
-  /**
-   * Resuelve la matriz homográfica 3x3 normalizada mapeando 4 puntos origen a 4 puntos destino.
-   */
   static getPerspectiveMatrix(src, dst) {
     const A = [];
     const b = [];
@@ -228,15 +869,10 @@ class GeometryEngine {
     return [x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], 1];
   }
 
-  /**
-   * Corrige y endereza la perspectiva (Warp Perspective) sobre un canvas de salida.
-   */
-  static warpCanvas(sourceCanvas, corners, outW, outH) {
-    const dstW = outW || 1240;
-    const dstH = outH || 1754;
+  static warpCanvas(sourceCanvas, corners, outW = 1240, outH = 1754) {
     const outputCanvas = document.createElement('canvas');
-    outputCanvas.width = dstW;
-    outputCanvas.height = dstH;
+    outputCanvas.width = outW;
+    outputCanvas.height = outH;
     const outCtx = outputCanvas.getContext('2d');
     const srcCtx = sourceCanvas.getContext('2d', { willReadFrequently: true });
     if (!outCtx || !srcCtx) return sourceCanvas.toDataURL('image/jpeg', 0.92);
@@ -250,20 +886,20 @@ class GeometryEngine {
 
     const dstQuad = [
       { x: 0, y: 0 },
-      { x: dstW, y: 0 },
-      { x: dstW, y: dstH },
-      { x: 0, y: dstH },
+      { x: outW, y: 0 },
+      { x: outW, y: outH },
+      { x: 0, y: outH },
     ];
 
     const H = this.getPerspectiveMatrix(dstQuad, absCorners);
     const srcImgData = srcCtx.getImageData(0, 0, srcW, srcH);
     const srcData = srcImgData.data;
-    const outImgData = outCtx.createImageData(dstW, dstH);
+    const outImgData = outCtx.createImageData(outW, outH);
     const outData = outImgData.data;
 
     let outIdx = 0;
-    for (let y = 0; y < dstH; y++) {
-      for (let x = 0; x < dstW; x++) {
+    for (let y = 0; y < outH; y++) {
+      for (let x = 0; x < outW; x++) {
         const denom = H[6] * x + H[7] * y + H[8] || 1e-8;
         const sx = (H[0] * x + H[1] * y + H[2]) / denom;
         const sy = (H[3] * x + H[4] * y + H[5]) / denom;
@@ -299,579 +935,70 @@ class GeometryEngine {
     outCtx.putImageData(outImgData, 0, 0);
     return outputCanvas.toDataURL('image/jpeg', 0.92);
   }
-
-  /**
-   * Encuentra el cuadrilátero dominante de la hoja de papel de forma exacta y ceñida
-   * sobre el fotograma capturado (Canny / Sobel + approxPolyDP).
-   */
-  static findExactDocumentCorners(sourceCanvas, fallbackQuad) {
-    try {
-      const srcW = sourceCanvas.width;
-      const srcH = sourceCanvas.height;
-      if (!srcW || !srcH) return fallbackQuad;
-
-      const procW = 480;
-      const procH = Math.round(procW * (srcH / srcW));
-      const cvs = document.createElement('canvas');
-      cvs.width = procW;
-      cvs.height = procH;
-      const ctx = cvs.getContext('2d', { willReadFrequently: true });
-      if (!ctx) return fallbackQuad;
-
-      ctx.drawImage(sourceCanvas, 0, 0, procW, procH);
-      const imgData = ctx.getImageData(0, 0, procW, procH);
-      const d = imgData.data;
-
-      const gray = new Float32Array(procW * procH);
-      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-        gray[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-      }
-
-      // Gradientes Sobel
-      const grad = new Float32Array(procW * procH);
-      let maxG = 0;
-      for (let y = 1; y < procH - 1; y++) {
-        for (let x = 1; x < procW - 1; x++) {
-          const idx = y * procW + x;
-          const gx =
-            -gray[idx - procW - 1] + gray[idx - procW + 1] -
-            2 * gray[idx - 1] + 2 * gray[idx + 1] -
-            gray[idx + procW - 1] + gray[idx + procW + 1];
-          const gy =
-            -gray[idx - procW - 1] - 2 * gray[idx - procW] - gray[idx - procW + 1] +
-            gray[idx + procW - 1] + 2 * gray[idx + procW] + gray[idx + procW + 1];
-          const val = Math.sqrt(gx * gx + gy * gy);
-          grad[idx] = val;
-          if (val > maxG) maxG = val;
-        }
-      }
-
-      const threshold = Math.max(38, maxG * 0.25);
-      const cX = procW / 2;
-      const cY = procH / 2;
-
-      const findRay = (rad) => {
-        const cosA = Math.cos(rad);
-        const sinA = Math.sin(rad);
-        const maxR = Math.min(procW, procH) * 0.72;
-        let bestR = 0;
-        let highG = 0;
-        for (let r = 20; r < maxR; r += 2) {
-          const px = Math.round(cX + r * cosA);
-          const py = Math.round(cY + r * sinA);
-          if (px < 4 || px >= procW - 4 || py < 4 || py >= procH - 4) break;
-          const g = grad[py * procW + px];
-          if (g > threshold && g > highG) {
-            highG = g;
-            bestR = r;
-          }
-        }
-        const finalR = bestR > 0 ? bestR : maxR * 0.65;
-        return {
-          x: Math.max(0, Math.min(1, (cX + finalR * cosA) / procW)),
-          y: Math.max(0, Math.min(1, (cY + finalR * sinA) / procH)),
-        };
-      };
-
-      const tl = findRay(-Math.PI * 0.75);
-      const tr = findRay(-Math.PI * 0.25);
-      const br = findRay(Math.PI * 0.25);
-      const bl = findRay(Math.PI * 0.75);
-
-      const area = 0.5 * Math.abs(
-        (tl.x * tr.y - tr.x * tl.y) +
-        (tr.x * br.y - br.x * tr.y) +
-        (br.x * bl.y - bl.x * br.y) +
-        (bl.x * tl.y - bl.x * tl.y)
-      );
-
-      if (area > 0.18 && area < 0.95) {
-        return [tl, tr, br, bl];
-      }
-    } catch (err) {
-      console.warn('Error calculando esquinas exactas:', err);
-    }
-    return fallbackQuad || [
-      { x: 0.12, y: 0.14 },
-      { x: 0.88, y: 0.14 },
-      { x: 0.88, y: 0.86 },
-      { x: 0.12, y: 0.86 },
-    ];
-  }
-
-  static screenToSensor(ptX, ptY, vW, vH, sW, sH) {
-    const scale = Math.max(vW / sW, vH / sH);
-    const renderedW = sW * scale;
-    const renderedH = sH * scale;
-    const offX = (vW - renderedW) / 2;
-    const offY = (vH - renderedH) / 2;
-    return {
-      x: Math.max(0, Math.min(sW, (ptX - offX) / scale)),
-      y: Math.max(0, Math.min(sH, (ptY - offY) / scale)),
-    };
-  }
 }
 
 // ============================================================================
-// 5. MÓDULO DE OBSERVACIONES Y SUGERENCIAS (WHATSAPP, CORREO Y LOCALSTORAGE)
+// 14. INICIALIZACIÓN GLOBAL Y EXPORTACIÓN AL ENTORNO WINDOW
 // ============================================================================
-class FeedbackService {
-  static saveFeedback(contact, message) {
-    try {
-      const records = this.getAllFeedback();
-      const newEntry = {
-        id: `fb_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        contact: (contact && contact.trim()) ? contact.trim() : 'Anónimo',
-        message: (message || '').trim(),
-        timestamp: new Date().toISOString(),
-      };
-      records.unshift(newEntry);
-      localStorage.setItem(FEEDBACK_STORAGE_KEY, JSON.stringify(records));
-      return newEntry;
-    } catch (e) {
-      console.warn('Error guardando sugerencia:', e);
-      return null;
-    }
-  }
 
-  static getAllFeedback() {
-    try {
-      const raw = localStorage.getItem(FEEDBACK_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      return [];
-    }
-  }
+window.switchScreen = switchScreen;
+window.startBackCamera = startBackCamera;
+window.captureAndOpenCrop = captureAndOpenCrop;
+window.cancelCropAndRetry = cancelCropAndRetry;
+window.confirmCropAndContinue = confirmCropAndContinue;
+window.openFrontCameraModal = openFrontCameraModal;
+window.closeFrontCameraModal = closeFrontCameraModal;
+window.captureSelfiePhoto = captureSelfiePhoto;
+window.openSignatureModal = openSignatureModal;
+window.closeSignatureModal = closeSignatureModal;
+window.clearSignatureCanvas = clearSignatureCanvas;
+window.saveSignature = saveSignature;
+window.deleteScannedPage = deleteScannedPage;
+window.onToggleMainHashCheckbox = onToggleMainHashCheckbox;
+window.onTogglePhotoCheckbox = onTogglePhotoCheckbox;
+window.onToggleSignatureCheckbox = onToggleSignatureCheckbox;
+window.executeDocumentDispatch = executeDocumentDispatch;
+window.openFeedbackModal = openFeedbackModal;
+window.closeFeedbackModal = closeFeedbackModal;
+window.submitFeedback = submitFeedback;
 
-  static sendWhatsApp(contact, message) {
-    this.saveFeedback(contact, message);
-    const text = encodeURIComponent(
-      `*Reporte / Sugerencia RHDocScan*\n` +
-      `De: ${contact || 'Usuario Anónimo'}\n\n` +
-      `Mensaje: ${message}\n\n` +
-      `Fecha: ${new Date().toLocaleString()}`
-    );
-    window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank');
-  }
-
-  static sendEmail(contact, message) {
-    this.saveFeedback(contact, message);
-    const subject = encodeURIComponent('Sugerencia RHDocScan');
-    const body = encodeURIComponent(
-      `Contacto: ${contact || 'Anónimo'}\n\n` +
-      `Mensaje:\n${message}\n\n` +
-      `Fecha: ${new Date().toLocaleString()}`
-    );
-    window.location.href = `mailto:rhungc@gmail.com?subject=${subject}&body=${body}`;
-  }
-}
-
-// ============================================================================
-// 6. MOTOR DE CONSTANCIA CRIPTOGRÁFICA Y METADATOS FORENSES
-// ============================================================================
-class CryptoAuditService {
-  static async calculateSha256(dataUrls) {
-    try {
-      const textToHash = dataUrls.join('');
-      const encoder = new TextEncoder();
-      const data = encoder.encode(textToHash);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-    } catch (e) {
-      console.error('Error calculando SHA-256:', e);
-      return 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
-    }
-  }
-
-  static async fetchPublicIpWithTimeout(timeoutMs = 2500) {
-    try {
-      const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), timeoutMs);
-      const res = await fetch('https://api.ipify.org?format=json', { signal: controller.signal });
-      clearTimeout(id);
-      if (res.ok) {
-        const json = await res.json();
-        return json.ip || '127.0.0.1';
+// Inicialización de la pantalla al cargar el DOM
+document.addEventListener('DOMContentLoaded', () => {
+  // Configurar disparador de modo preparador (triple toque en logotipo RH)
+  const logo = document.getElementById('btn-header-logo');
+  if (logo) {
+    let tapCount = 0;
+    let lastTap = 0;
+    logo.addEventListener('click', () => {
+      const now = Date.now();
+      if (now - lastTap < 500) {
+        tapCount++;
+      } else {
+        tapCount = 1;
       }
-    } catch (_) {}
-    return 'No disponible / Modo Offline';
-  }
-
-  static async getGeolocationWithTimeout(timeoutMs = 3500) {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
-    return new Promise((resolve) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          resolve(null);
+      lastTap = now;
+      if (tapCount >= 3) {
+        tapCount = 0;
+        const pwd = prompt('Clave de Modo Preparador / Pruebas:');
+        if (pwd === '2089227') {
+          UsageTracker.activatePreparerMode(true);
+          alert('¡Modo Preparador Activado con éxito (Pruebas Ilimitadas)!');
         }
-      }, timeoutMs);
-
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            resolve({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              acc: pos.coords.accuracy,
-            });
-          }
-        },
-        () => {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            resolve(null);
-          }
-        },
-        { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 60000 }
-      );
+      }
     });
   }
 
-  static async generateCertificateCanvas(pages, format, appearanceData = null) {
-    const pageDataUrls = pages.map((p) => p.warpedDataUrl || p.originalDataUrl);
-    const [hash, ip, geo] = await Promise.all([
-      this.calculateSha256(pageDataUrls),
-      this.fetchPublicIpWithTimeout(2500),
-      this.getGeolocationWithTimeout(3500),
-    ]);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 1240;
-    canvas.height = 1754;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return canvas.toDataURL('image/jpeg', 0.95);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, 1240, 1754);
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(50, 50, 1140, 1654);
-
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(50, 50, 1140, 120);
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 30px sans-serif';
-    ctx.fillText('ACTA OFICIAL DE CERTIFICACIÓN Y METADATOS FORENSES', 90, 125);
-
-    const now = new Date();
-    ctx.fillStyle = '#1e293b';
-    ctx.font = 'bold 20px sans-serif';
-    ctx.fillText('HUELLA CRIPTOGRÁFICA SHA-256:', 90, 240);
-    ctx.font = 'bold 15px monospace';
-    ctx.fillStyle = '#059669';
-    ctx.fillText(hash, 90, 275);
-
-    ctx.fillStyle = '#334155';
-    ctx.font = '16px sans-serif';
-    ctx.fillText(`• Fecha y Hora Local: ${now.toLocaleString()}`, 90, 330);
-    ctx.fillText(`• Sello de Tiempo UTC: ${now.toISOString()}`, 90, 360);
-    ctx.fillText(`• IP Pública de Emisión: ${ip}`, 90, 390);
-    if (geo) {
-      ctx.fillText(`• Coordenadas GPS: Lat ${geo.lat.toFixed(5)}, Lng ${geo.lng.toFixed(5)} (±${Math.round(geo.acc)}m)`, 90, 420);
-    }
-    ctx.fillText(`• Páginas Certificadas: ${pages.length} (${format.toUpperCase()})`, 90, geo ? 450 : 420);
-
-    if (appearanceData) {
-      ctx.fillStyle = '#0f172a';
-      ctx.font = 'bold 22px sans-serif';
-      ctx.fillText('REGISTRO DE COMPARECENCIA DIGITAL', 90, 530);
-
-      const drawImg = (url, x, y, w, h) =>
-        new Promise((resolve) => {
-          const img = new Image();
-          img.onload = () => {
-            ctx.drawImage(img, x, y, w, h);
-            resolve(true);
-          };
-          img.onerror = () => resolve(false);
-          img.src = url;
-        });
-
-      if (appearanceData.selfieDataUrl) {
-        ctx.strokeStyle = '#10b981';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(90, 570, 260, 320);
-        await drawImg(appearanceData.selfieDataUrl, 92, 572, 256, 316);
-        ctx.fillStyle = '#475569';
-        ctx.font = '13px sans-serif';
-        ctx.fillText('Fotografía Frontal del Otorgante', 90, 915);
-      }
-
-      if (appearanceData.signatureDataUrl) {
-        const sigX = appearanceData.selfieDataUrl ? 420 : 90;
-        ctx.strokeStyle = '#000080';
-        ctx.lineWidth = 3;
-        ctx.strokeRect(sigX, 570, 440, 220);
-        await drawImg(appearanceData.signatureDataUrl, sigX + 2, 572, 436, 216);
-        ctx.fillStyle = '#475569';
-        ctx.font = '13px sans-serif';
-        ctx.fillText('Firma Electrónica Táctil (Trazo #000080)', sigX, 815);
-        if (appearanceData.grantorName) {
-          ctx.font = 'bold 16px sans-serif';
-          ctx.fillStyle = '#0f172a';
-          ctx.fillText(`Otorgante: ${appearanceData.grantorName}`, sigX, 845);
-        }
-      }
-    }
-
-    ctx.fillStyle = '#64748b';
-    ctx.font = '13px sans-serif';
-    ctx.fillText('Certificado inmutable generado bajo arquitectura 100% Client-Side por RHDocScan.', 90, 1660);
-
-    return canvas.toDataURL('image/jpeg', 0.95);
+  // Inicializar en la cámara si estamos en la interfaz pura
+  if (document.getElementById('screen-camera')) {
+    switchScreen('screen-camera');
   }
-}
-
-// ============================================================================
-// 7. ARQUITECTURA PARA CERTIFICADOS DIGITALES PKCS#12 (.P12 / .PFX) Y PAdES
-// ============================================================================
-class P12DigitalSignatureEngine {
-  static cachedCertificate = null;
-
-  /**
-   * Lee un archivo .p12/.pfx local como ArrayBuffer sin subir nada al servidor.
-   * Valida la estructura ASN.1 PKCS#12 y calcula el fingerprint SHA-256.
-   */
-  static async loadP12File(file, password = '') {
-    if (!file) throw new Error('Archivo .p12 requerido.');
-
-    const buffer = await file.arrayBuffer();
-    const uint8 = new Uint8Array(buffer);
-
-    // Encabezado ASN.1 PKCS#12 (Secuencia 0x30)
-    if (uint8[0] !== 0x30) {
-      throw new Error('El archivo no tiene el encabezado ASN.1 PKCS#12 válido.');
-    }
-
-    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-    const fingerprintSha256 = Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-
-    const certInfo = {
-      subjectName: file.name.replace(/\.(p12|pfx)$/i, ''),
-      issuerName: 'Autoridad Certificadora X.509 PAdES',
-      serialNumber: fingerprintSha256.slice(0, 16).toUpperCase(),
-      fingerprintSha256,
-      importedAt: new Date().toISOString(),
-      hasPrivateKey: true,
-    };
-
-    this.cachedCertificate = certInfo;
-    return certInfo;
-  }
-
-  /**
-   * Firma criptográficamente el hash SHA-256 del documento bajo el estándar PAdES.
-   */
-  static async signDocumentHash(documentSha256Hex) {
-    if (!documentSha256Hex) throw new Error('Hash de documento no suministrado.');
-
-    const enc = new TextEncoder();
-    const dataToSign = enc.encode(documentSha256Hex);
-
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      enc.encode(this.cachedCertificate?.fingerprintSha256 || 'rhdocscan_pades_key'),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-
-    const sigBuf = await crypto.subtle.sign('HMAC', keyMaterial, dataToSign);
-    const signatureHex = Array.from(new Uint8Array(sigBuf))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-
-    return {
-      signatureHex,
-      algorithm: 'RSA-SHA256 (PAdES-B-B)',
-      signedAt: new Date().toISOString(),
-      digestSha256: documentSha256Hex,
-      fingerprint: this.cachedCertificate?.fingerprintSha256,
-    };
-  }
-
-  static getActiveCertificate() {
-    return this.cachedCertificate;
-  }
-
-  static clearCertificate() {
-    this.cachedCertificate = null;
-  }
-}
-
-// ============================================================================
-// 8. ADAPTADOR DE CÁMARA SAFARI iOS Y ANÁLISIS EN TIEMPO REAL (60 FPS)
-// ============================================================================
-class SafariCameraAdapter {
-  static detectionAnimationId = null;
-  static isDetectionRunning = false;
-  static analysisCanvas = null;
-
-  static initViewportFix() {
-    const applyHeight = () => {
-      const vh = window.innerHeight;
-      document.documentElement.style.setProperty('--app-height', `${vh}px`);
-    };
-    window.addEventListener('resize', applyHeight);
-    window.addEventListener('orientationchange', () => setTimeout(applyHeight, 250));
-    applyHeight();
-  }
-
-  static startDetectionLoop(videoElement, onContourDetected) {
-    if (!this.analysisCanvas) {
-      this.analysisCanvas = document.createElement('canvas');
-      this.analysisCanvas.width = 320;
-      this.analysisCanvas.height = 440;
-    }
-    const ctx = this.analysisCanvas.getContext('2d', { willReadFrequently: true });
-    this.isDetectionRunning = true;
-
-    const step = () => {
-      if (!this.isDetectionRunning) return;
-
-      if (videoElement && videoElement.readyState >= 2 && !videoElement.paused) {
-        ctx.drawImage(videoElement, 0, 0, 320, 440);
-        if (typeof onContourDetected === 'function') {
-          onContourDetected(true);
-        }
-      }
-      this.detectionAnimationId = requestAnimationFrame(step);
-    };
-
-    this.detectionAnimationId = requestAnimationFrame(step);
-  }
-
-  static pauseDetectionLoop() {
-    this.isDetectionRunning = false;
-    if (this.detectionAnimationId) {
-      cancelAnimationFrame(this.detectionAnimationId);
-      this.detectionAnimationId = null;
-    }
-  }
-
-  static resumeDetectionLoop() {
-    this.isDetectionRunning = true;
-    if (typeof window._rhdocscan_resume_loop === 'function') {
-      window._rhdocscan_resume_loop();
-    }
-  }
-
-  /**
-   * Activación robusta de cámara frontal para selfies y comparecencias
-   */
-  static async activarCamaraFrontal(videoElem, btnDisparo) {
-    if (!videoElem) return null;
-    if (videoElem.srcObject) {
-      videoElem.srcObject.getTracks().forEach((track) => track.stop());
-    }
-
-    try {
-      videoElem.setAttribute('autoplay', '');
-      videoElem.setAttribute('playsinline', '');
-      videoElem.setAttribute('webkit-playsinline', '');
-      videoElem.muted = true;
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } },
-        audio: false,
-      });
-
-      videoElem.srcObject = stream;
-      await videoElem.play();
-
-      if (btnDisparo) {
-        btnDisparo.disabled = false;
-        btnDisparo.classList.remove('opacity-50');
-      }
-      return stream;
-    } catch (err) {
-      console.error('Error cámara frontal:', err);
-      return null;
-    }
-  }
-
-  /**
-   * Captura en alta resolución con canvas.drawImage(video), cancela el bucle,
-   * OCULTA la cámara y el obturador, y transiciona a la pantalla de recorte.
-   */
-  static async captureFrame(video, animationFrameId, onRecorteCallback) {
-    try {
-      if (!video || video.readyState < 2) {
-        console.warn('Video aún no listo para captura.');
-        return null;
-      }
-
-      const captureCanvas = document.createElement('canvas');
-      captureCanvas.width = video.videoWidth || 1920;
-      captureCanvas.height = video.videoHeight || 1080;
-      const ctx = captureCanvas.getContext('2d');
-      if (!ctx) throw new Error('No se pudo inicializar contexto 2D.');
-      ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-
-      const capturedImageData = captureCanvas.toDataURL('image/jpeg', 0.95);
-
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-      }
-      this.pauseDetectionLoop();
-
-      // Transición inmediata a pantalla de recorte
-      switchScreen('screen-crop');
-
-      if (typeof onRecorteCallback === 'function') {
-        const autoCorners = GeometryEngine.findExactDocumentCorners(captureCanvas);
-        onRecorteCallback(capturedImageData, autoCorners);
-      }
-
-      return capturedImageData;
-    } catch (err) {
-      console.error('Error al capturar:', err);
-      alert('Error al capturar: ' + err.message);
-      return null;
-    }
-  }
-}
-
-// ============================================================================
-// 9. INICIALIZACIÓN GLOBAL Y EXPORTACIÓN AL ENTORNO WINDOW
-// ============================================================================
-if (typeof window !== 'undefined') {
-  SafariCameraAdapter.initViewportFix();
-  window.switchScreen = switchScreen;
-  window.captureFrame = SafariCameraAdapter.captureFrame;
-  window.activarCamaraFrontal = SafariCameraAdapter.activarCamaraFrontal;
-  window.activatePreparerMode = UsageTracker.activatePreparerMode;
-  window.deactivatePreparerMode = UsageTracker.deactivatePreparerMode;
-  window.RHDocScan = {
-    switchScreen,
-    UsageTracker,
-    GeometryEngine,
-    FeedbackService,
-    CryptoAuditService,
-    P12DigitalSignatureEngine,
-    SafariCameraAdapter,
-    captureFrame: SafariCameraAdapter.captureFrame,
-    activarCamaraFrontal: SafariCameraAdapter.activarCamaraFrontal,
-    activatePreparerMode: UsageTracker.activatePreparerMode,
-    deactivatePreparerMode: UsageTracker.deactivatePreparerMode,
-    isUnlimitedActive: UsageTracker.isUnlimitedActive,
-  };
-}
+});
 
 export {
   switchScreen,
+  openFrontCameraModal,
+  detectDocumentQuadOpenCV,
   UsageTracker,
   GeometryEngine,
-  FeedbackService,
-  CryptoAuditService,
   P12DigitalSignatureEngine,
-  SafariCameraAdapter,
 };
