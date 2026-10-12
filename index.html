@@ -31,8 +31,8 @@
     <!-- OpenCV.js para Visión por Computadora en el Navegador -->
     <script async src="https://docs.opencv.org/4.7.0/opencv.js" onload="window.cvReady = true; console.log('OpenCV.js listo');"></script>
 
-    <!-- Estilos Globales -->
-    <link rel="stylesheet" href="/styles.css" />
+    <!-- Estilos Globales con Cache-Busting -->
+    <link rel="stylesheet" href="styles.css?v=3.5" />
   </head>
   <body class="bg-[#0a0f18] text-slate-100 antialiased overflow-hidden select-none" data-screen="screen-camera">
     
@@ -224,8 +224,8 @@
       </div>
     </div>
 
-    <!-- SCRIPTS DE ARRANQUE -->
-    <script type="module" src="/app.js"></script>
+    <!-- SCRIPTS DE ARRANQUE CON CACHE-BUSTING -->
+    <script src="app.js?v=3.5" defer></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
