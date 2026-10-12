@@ -274,12 +274,12 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             </label>
           </div>
 
-          {/* BARRA INFERIOR DE ACCIÓN: GUARDAR / ENVIAR */}
-          <div className="pb-safe px-safe pt-2 bg-[#0a0f18] border-t border-white/10 flex flex-col gap-2 z-20">
+          {/* BARRA INFERIOR DE ACCIÓN ERGONÓMICA: GUARDAR / ENVIAR */}
+          <div className="pb-safe px-safe pt-3 pb-4 bg-[#0a0f18] border-t border-white/10 flex flex-col gap-2 z-20">
             <button
               onClick={handleExecuteSaveAndSend}
               disabled={isGenerating || pages.length === 0}
-              className="w-full py-3.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-sm tracking-wide transition flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/30 active:scale-98 disabled:opacity-50"
+              className="btn-touch-primary w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-base min-h-[52px] py-[14px] px-[28px] rounded-2xl shadow-xl shadow-emerald-500/30 active:scale-98 disabled:opacity-50"
             >
               {isGenerating ? (
                 <>
@@ -288,7 +288,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
                 </>
               ) : (
                 <>
-                  <Share2 className="w-5 h-5" />
+                  <Share2 className="w-5 h-5 stroke-[2.2]" />
                   <span>Guardar / Enviar</span>
                 </>
               )}

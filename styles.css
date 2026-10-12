@@ -240,3 +240,52 @@ video, .camera-video {
   border: 2.5px solid #10b981;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45), 0 0 25px rgba(16, 185, 129, 0.35);
 }
+
+/* ==========================================================================
+   4. CORRECCIÓN ERGONÓMICA: BOTONES AMPLIOS Y CÓMODOS (TOUCH-FRIENDLY)
+   ========================================================================== */
+
+/* Botón de "Observaciones y Sugerencias" en barra superior: amplio y cómodo (mínimo 44px de alto) */
+.btn-header-feedback {
+  min-height: 44px !important;
+  padding: 8px 16px !important;
+  font-size: 14px !important;
+  font-weight: bold !important;
+  border-radius: 14px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  touch-action: manipulation !important;
+  -webkit-tap-highlight-color: transparent !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.btn-header-feedback:active {
+  transform: scale(0.96) !important;
+}
+
+/* Botones principales de avance ("Continuar", "Guardar / Enviar", "Repetir foto"): mínimo 52px de alto */
+.btn-touch-action,
+.btn-touch-primary {
+  min-height: 52px !important;
+  padding: 14px 28px !important;
+  font-size: 16px !important;
+  font-weight: bold !important;
+  border-radius: 18px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 10px !important;
+  touch-action: manipulation !important;
+  -webkit-tap-highlight-color: transparent !important;
+  cursor: pointer !important;
+  transition: transform 0.12s ease, background-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.btn-touch-action:active,
+.btn-touch-primary:active {
+  transform: scale(0.96) !important;
+}
+

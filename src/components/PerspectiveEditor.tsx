@@ -507,34 +507,34 @@ export const PerspectiveEditor: React.FC<PerspectiveEditorProps> = ({
         </button>
       </div>
 
-      {/* BARRA INFERIOR DE ACCIONES: ÚNICAMENTE DOS BOTONES */}
-      <div className="pb-safe px-safe pt-2.5 pb-3 bg-[#0c0f14] border-t border-white/10 flex items-center justify-between gap-3 z-20">
-        {/* Botón 1: 🔄 Repetir foto */}
+      {/* BARRA INFERIOR DE ACCIONES: ÚNICAMENTE DOS BOTONES ERGONÓMICOS TÁCTILES */}
+      <div className="pb-safe px-safe pt-3 pb-4 bg-[#0c0f14] border-t border-white/10 flex items-center justify-between gap-3 z-20">
+        {/* Botón 1: 🔄 Repetir foto (mínimo 52px de alto, 16px negrita, padding 14px 28px) */}
         <button
           onClick={onCancel}
           disabled={isProcessing}
-          className="flex-1 py-3.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs tracking-wide transition flex items-center justify-center gap-2 border border-slate-700/80 active:scale-95 shadow-md"
-          title="Descartar captura y volver a la cámara"
+          className="btn-touch-action flex-1 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700/80 shadow-md text-base font-bold min-h-[52px] py-[14px] px-[28px] rounded-2xl"
+          title="Descartar captura actual y volver a la cámara"
         >
-          <RotateCcw className="w-4 h-4 text-emerald-400" />
+          <RotateCcw className="w-5 h-5 text-emerald-400 stroke-[2.2]" />
           <span>🔄 Repetir foto</span>
         </button>
 
-        {/* Botón 2 (Destacado): Continuar ➔ */}
+        {/* Botón 2 (Destacado): Continuar ➔ (mínimo 52px de alto, 16px negrita, padding 14px 28px) */}
         <button
           onClick={() => handleConfirmSave(false)}
           disabled={isProcessing}
-          className="flex-1 py-3.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs tracking-wide transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 active:scale-95 disabled:opacity-50"
+          className="btn-touch-primary flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-base shadow-xl shadow-emerald-500/30 min-h-[52px] py-[14px] px-[28px] rounded-2xl disabled:opacity-50"
         >
           {isProcessing ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-5 h-5 animate-spin" />
               <span>Procesando...</span>
             </>
           ) : (
             <>
               <span>Continuar</span>
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight className="w-5 h-5 stroke-[2.5]" />
             </>
           )}
         </button>

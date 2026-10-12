@@ -31,6 +31,7 @@ const STORAGE_KEY = 'scan_tracker';
 const FEEDBACK_STORAGE_KEY = 'rhdocscan_feedback';
 const TEST_EXPIRE_KEY = 'rhdocscan_test_mode_expires';
 const TEST_UNLIMITED_KEY = 'rhdocscan_is_unlimited';
+const PREPARER_UNLIMITED_KEY = 'rhdocscan_unlimited';
 
 // ============================================================================
 // 2. MÁQUINA DE ESTADOS FINITOS (FSM) - ENRUTADOR CENTRALIZADO
@@ -141,16 +142,23 @@ class UsageTracker {
   }
 
   /**
-   * Comprueba si el modo de pruebas ilimitado (2 horas) está activo
+   * Comprueba si el modo de pruebas / preparador ilimitado está activo
+   * Soporta modo permanente (rhdocscan_unlimited = 'true') y modo de 2 horas
    */
   static isUnlimitedActive() {
     try {
+      if (localStorage.getItem(PREPARER_UNLIMITED_KEY) === 'true') {
+        return true;
+      }
       const expiresStr = localStorage.getItem(TEST_EXPIRE_KEY);
       const isUnlimited = localStorage.getItem(TEST_UNLIMITED_KEY);
       if (isUnlimited === 'true' && expiresStr) {
         const expireTime = parseInt(expiresStr, 10);
         if (!isNaN(expireTime) && Date.now() < expireTime) {
           return true;
+        } else {
+          localStorage.removeItem(TEST_EXPIRE_KEY);
+          localStorage.removeItem(TEST_UNLIMITED_KEY);
         }
       }
     } catch (e) {
@@ -160,7 +168,7 @@ class UsageTracker {
   }
 
   /**
-   * Valida la clave secreta 2089227 para desbloqueo de 2 horas continuas
+   * Valida la clave secreta 2089227 para desbloqueo ilimitado
    */
   static checkUnlockKey(inputVal) {
     if (!inputVal) return false;
@@ -169,9 +177,41 @@ class UsageTracker {
       const expireTime = Date.now() + (2 * 60 * 60 * 1000);
       localStorage.setItem(TEST_EXPIRE_KEY, expireTime.toString());
       localStorage.setItem(TEST_UNLIMITED_KEY, 'true');
+      localStorage.setItem(PREPARER_UNLIMITED_KEY, 'true');
       return true;
     }
     return false;
+  }
+
+  /**
+   * Activa el modo preparador / pruebas de forma directa
+   */
+  static activatePreparerMode(permanent = true) {
+    try {
+      localStorage.setItem(PREPARER_UNLIMITED_KEY, 'true');
+      localStorage.setItem(TEST_UNLIMITED_KEY, 'true');
+      if (!permanent) {
+        const expireTime = Date.now() + (2 * 60 * 60 * 1000);
+        localStorage.setItem(TEST_EXPIRE_KEY, expireTime.toString());
+      }
+      return true;
+    } catch (e) {
+      console.error('Error activando modo preparador:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Desactiva el modo preparador / pruebas
+   */
+  static deactivatePreparerMode() {
+    try {
+      localStorage.removeItem(PREPARER_UNLIMITED_KEY);
+      localStorage.removeItem(TEST_UNLIMITED_KEY);
+      localStorage.removeItem(TEST_EXPIRE_KEY);
+    } catch (e) {
+      console.error('Error desactivando modo preparador:', e);
+    }
   }
 
   static hasQuota() {
@@ -639,6 +679,8 @@ if (typeof window !== 'undefined') {
   SafariCameraAdapter.initViewportFix();
   window.switchScreen = switchScreen;
   window.captureFrame = SafariCameraAdapter.captureFrame;
+  window.activatePreparerMode = UsageTracker.activatePreparerMode;
+  window.deactivatePreparerMode = UsageTracker.deactivatePreparerMode;
   window.RHDocScan = {
     switchScreen,
     UsageTracker,
@@ -647,6 +689,9 @@ if (typeof window !== 'undefined') {
     DocumentShareService,
     SafariCameraAdapter,
     captureFrame: SafariCameraAdapter.captureFrame,
+    activatePreparerMode: UsageTracker.activatePreparerMode,
+    deactivatePreparerMode: UsageTracker.deactivatePreparerMode,
+    isUnlimitedActive: UsageTracker.isUnlimitedActive,
   };
 }
 

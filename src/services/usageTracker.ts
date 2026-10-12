@@ -149,10 +149,17 @@ export function setUnlimitedMonth(month: number): ScanTrackerState {
 }
 
 /**
- * Comprueba si el modo de pruebas ilimitado (2 horas) está activo
+ * Comprueba si el modo de pruebas / preparador ilimitado está activo
+ * Soporta modo permanente (rhdocscan_unlimited = 'true') y modo 2 horas
  */
 export function isTestModeActive(): boolean {
   try {
+    // 1. Clave permanente de modo preparador
+    if (localStorage.getItem('rhdocscan_unlimited') === 'true') {
+      return true;
+    }
+
+    // 2. Clave de pruebas con expiración temporal (2 horas)
     const expiresStr = localStorage.getItem('rhdocscan_test_mode_expires');
     const isUnlimited = localStorage.getItem('rhdocscan_is_unlimited');
     if (isUnlimited === 'true' && expiresStr) {
@@ -177,6 +184,39 @@ export function activateTestMode2Hours(): void {
   const expireTime = Date.now() + 2 * 60 * 60 * 1000;
   localStorage.setItem('rhdocscan_test_mode_expires', expireTime.toString());
   localStorage.setItem('rhdocscan_is_unlimited', 'true');
+  localStorage.setItem('rhdocscan_unlimited', 'true');
+}
+
+/**
+ * Activa modo preparador / pruebas con la clave maestra '2089227'
+ * @param permanent Si es true, activa modo permanente sin expiración
+ */
+export function activatePreparerMode(permanent = true): boolean {
+  try {
+    localStorage.setItem('rhdocscan_unlimited', 'true');
+    localStorage.setItem('rhdocscan_is_unlimited', 'true');
+    if (!permanent) {
+      const expireTime = Date.now() + 2 * 60 * 60 * 1000;
+      localStorage.setItem('rhdocscan_test_mode_expires', expireTime.toString());
+    }
+    return true;
+  } catch (e) {
+    console.error('Error activando modo preparador:', e);
+    return false;
+  }
+}
+
+/**
+ * Desactiva el modo preparador / pruebas
+ */
+export function deactivatePreparerMode(): void {
+  try {
+    localStorage.removeItem('rhdocscan_unlimited');
+    localStorage.removeItem('rhdocscan_is_unlimited');
+    localStorage.removeItem('rhdocscan_test_mode_expires');
+  } catch (e) {
+    console.error('Error desactivando modo preparador:', e);
+  }
 }
 
 /**

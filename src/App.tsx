@@ -21,6 +21,7 @@ import { RegistrationModal } from './components/RegistrationModal';
 import { QuotaExceededBanner } from './components/QuotaExceededBanner';
 import { FeedbackModal } from './components/FeedbackModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
+import { PreparerModeModal } from './components/PreparerModeModal';
 import {
   Quad,
   ScanMode,
@@ -66,6 +67,7 @@ export default function App() {
   const [isRegistrationOpen, setIsRegistrationOpen] = useState<boolean>(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState<boolean>(false);
   const [isAdminOpen, setIsAdminOpen] = useState<boolean>(false);
+  const [isPreparerModalOpen, setIsPreparerModalOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Información del último despacho
@@ -296,6 +298,8 @@ export default function App() {
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenReview={() => switchScreen('screen-gallery')}
           onShareApp={handleShareApp}
+          onOpenFeedback={() => setIsFeedbackOpen(true)}
+          onOpenPreparerMode={() => setIsPreparerModalOpen(true)}
           pages={pages}
           maxPages={MAX_PAGES_PER_DOCUMENT}
           isQuotaExceeded={isQuotaExceeded}
@@ -496,6 +500,17 @@ export default function App() {
       {/* MODAL DE COMENTARIOS Y SUGERENCIAS */}
       {isFeedbackOpen && (
         <FeedbackModal onClose={() => setIsFeedbackOpen(false)} />
+      )}
+
+      {/* MODAL MODO PREPARADOR / PRUEBAS (DISPARADOR DISIMULADO TRIPLE TOQUE O CLAVE 2089227) */}
+      {isPreparerModalOpen && (
+        <PreparerModeModal
+          onClose={() => setIsPreparerModalOpen(false)}
+          onSuccess={(msg) => {
+            setTrackerState(getUsageState());
+            showToast(msg);
+          }}
+        />
       )}
 
       {/* PANEL DE CONTROL DE ADMINISTRACIÓN Y AUDITORÍA FORENSE SHA-256 */}

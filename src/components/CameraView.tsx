@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   Scan,
   Share2,
+  MessageSquare,
 } from 'lucide-react';
 import { DocumentDetector, calculateFolioQuad, sensorToScreenPoint } from '../utils/cvEngine';
 import { playShutterSound, playFocusLockTone, triggerHaptic } from '../utils/audioFeedback';
@@ -27,6 +28,8 @@ interface CameraViewProps {
   onOpenSettings: () => void;
   onOpenReview: () => void;
   onShareApp?: () => void;
+  onOpenFeedback?: () => void;
+  onOpenPreparerMode?: () => void;
   pages: ScannedPage[];
   maxPages: number;
   isQuotaExceeded: boolean;
@@ -42,6 +45,8 @@ export const CameraView: React.FC<CameraViewProps> = ({
   onOpenSettings,
   onOpenReview,
   onShareApp,
+  onOpenFeedback,
+  onOpenPreparerMode,
   pages,
   maxPages,
   isQuotaExceeded,
@@ -78,6 +83,41 @@ export const CameraView: React.FC<CameraViewProps> = ({
   const animationFrameRef = useRef<number | null>(null);
   const isCapturingRef = useRef<boolean>(false);
   const prevStableStateRef = useRef<boolean>(false);
+
+  // Triple toque o pulsación larga en logotipo RH para Modo Preparador / Pruebas
+  const tapCountRef = useRef<number>(0);
+  const lastTapTimeRef = useRef<number>(0);
+  const longPressTimerRef = useRef<number | null>(null);
+
+  const handleLogoTap = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTapTimeRef.current < 650) {
+      tapCountRef.current += 1;
+    } else {
+      tapCountRef.current = 1;
+    }
+    lastTapTimeRef.current = now;
+
+    if (tapCountRef.current >= 3) {
+      tapCountRef.current = 0;
+      triggerHaptic(60);
+      onOpenPreparerMode?.();
+    }
+  }, [onOpenPreparerMode]);
+
+  const handleLogoTouchStart = useCallback(() => {
+    longPressTimerRef.current = window.setTimeout(() => {
+      triggerHaptic(70);
+      onOpenPreparerMode?.();
+    }, 850);
+  }, [onOpenPreparerMode]);
+
+  const handleLogoTouchEnd = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
 
   // Iniciar flujo de cámara
   const startCamera = useCallback(async () => {
@@ -464,9 +504,15 @@ export const CameraView: React.FC<CameraViewProps> = ({
 
       {/* BARRA SUPERIOR MINIMALISTA */}
       <div className="absolute top-0 inset-x-0 z-20 pt-safe px-safe flex items-center justify-between pb-3 bg-gradient-to-b from-black/85 via-black/45 to-transparent">
-        {/* Título e Identidad RHDocScan */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/20">
+        {/* Título e Identidad RHDocScan con Disparador Escondido (Triple toque o Long-press) */}
+        <div
+          onClick={handleLogoTap}
+          onTouchStart={handleLogoTouchStart}
+          onTouchEnd={handleLogoTouchEnd}
+          className="flex items-center gap-2 cursor-pointer active:scale-95 transition select-none"
+          title="Toca 3 veces para Modo Preparador / Pruebas"
+        >
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-500 flex items-center justify-center text-slate-950 font-black text-sm shadow-lg shadow-emerald-500/25 border border-white/20">
             RH
           </div>
           <div className="flex flex-col">
@@ -474,6 +520,20 @@ export const CameraView: React.FC<CameraViewProps> = ({
             <span className="text-[10px] text-emerald-400 font-medium tracking-wider">Zero-Knowledge</span>
           </div>
         </div>
+
+        {/* Botón Ergonómico de Observaciones y Sugerencias (mínimo 44px de alto, padding generoso 8px 16px) */}
+        {onOpenFeedback && (
+          <button
+            type="button"
+            onClick={onOpenFeedback}
+            className="btn-header-feedback glass-panel text-slate-200 hover:text-white border border-white/10 shadow-sm"
+            title="💬 Observaciones y Sugerencias"
+          >
+            <MessageSquare className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span className="hidden xs:inline">💬 Sugerencias</span>
+            <span className="xs:hidden">💬</span>
+          </button>
+        )}
 
         {/* Selector de formato: [PDF (predeterminado) | JPG] */}
         <div className="flex items-center rounded-xl bg-slate-900/80 p-0.5 border border-white/10 backdrop-blur shadow-sm">
