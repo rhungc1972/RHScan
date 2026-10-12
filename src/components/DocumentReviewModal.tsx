@@ -41,6 +41,7 @@ interface DocumentReviewModalProps {
   onRotatePage: (id: string) => void;
   onCompleteScan: () => void;
   onOpenFeedback?: () => void;
+  onShareApp?: () => void;
 }
 
 export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
@@ -54,6 +55,7 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
   onRotatePage,
   onCompleteScan,
   onOpenFeedback,
+  onShareApp,
 }) => {
   const [selectedPageIndex, setSelectedPageIndex] = useState<number>(0);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -247,24 +249,53 @@ export const DocumentReviewModal: React.FC<DocumentReviewModalProps> = ({
             </div>
           )}
 
-          {/* Botón Prominente: Observaciones y Sugerencias */}
-          <div className="w-full max-w-xs pt-4 space-y-3">
+          {/* Botones de acción ampliados (Mínimo 52px y 48px, 100% táctiles y funcionales) */}
+          <div className="w-full max-w-xs pt-3 space-y-2.5">
+            {/* Botón 1: + Iniciar Nuevo Escaneo (Primario verde, min 52px, 16px negrita) */}
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn-touch-primary w-full bg-[#10b981] hover:bg-[#059669] text-slate-950 font-black text-base min-h-[52px] py-[14px] px-[24px] rounded-2xl shadow-xl shadow-emerald-500/25 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Plus className="w-5 h-5 stroke-[2.5]" />
+              <span>+ Iniciar Nuevo Escaneo</span>
+            </button>
+
+            {/* Botón 2: 🔗 Compartir RHDocScan (Secundario amplio, min 48px) */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic(30);
+                if (onShareApp) {
+                  onShareApp();
+                } else if (navigator.share) {
+                  navigator.share({
+                    title: 'RHDocScan',
+                    text: 'RHDocScan - Escáner Documental Privado Zero-Knowledge',
+                    url: window.location.href,
+                  }).catch(() => {});
+                } else {
+                  navigator.clipboard?.writeText(window.location.href);
+                  alert('Enlace copiado al portapapeles');
+                }
+              }}
+              className="btn-touch-action w-full min-h-[48px] py-3 px-6 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-bold text-sm border border-white/15 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <Share2 className="w-4 h-4 text-cyan-400" />
+              <span>🔗 Compartir RHDocScan</span>
+            </button>
+
+            {/* Botón 3: 💬 Comentarios y Sugerencias (Amplio, activo, min 48px) */}
             {onOpenFeedback && (
               <button
+                type="button"
                 onClick={onOpenFeedback}
-                className="btn-touch-primary w-full bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-600 hover:to-cyan-600 text-slate-950 font-bold text-sm tracking-wide transition shadow-lg shadow-emerald-500/25 active:scale-98 flex items-center justify-center gap-2"
+                className="btn-touch-action w-full min-h-[48px] py-3 px-6 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white font-bold text-sm border border-white/10 active:scale-95 transition flex items-center justify-center gap-2 cursor-pointer"
               >
-                <MessageSquare className="w-4 h-4" />
-                <span>💬 Observaciones y Sugerencias</span>
+                <MessageSquare className="w-4 h-4 text-emerald-400" />
+                <span>💬 Comentarios y Sugerencias</span>
               </button>
             )}
-
-            <button
-              onClick={onClose}
-              className="btn-restart w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold transition"
-            >
-              + Iniciar Nuevo Escaneo
-            </button>
           </div>
         </div>
       ) : (

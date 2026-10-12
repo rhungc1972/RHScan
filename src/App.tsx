@@ -371,6 +371,7 @@ export default function App() {
             onRotatePage={handleRotatePage}
             onCompleteScan={handleCompleteScan}
             onOpenFeedback={() => setIsFeedbackOpen(true)}
+            onShareApp={handleShareApp}
           />
         )}
       </div>
