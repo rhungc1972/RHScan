@@ -1,5 +1,5 @@
 /**
- * app.js - RHDocScan v3.5.0
+ * app.js - RHDocScan v5.0
  * Zero-Knowledge Client-Side Document Scanner & FSM Architecture
  * 
  * 1. AUTO-AJUSTE EXACTO DEL MARCO VERDE ESMERALDA (#10b981):
